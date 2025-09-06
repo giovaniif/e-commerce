@@ -7,20 +7,27 @@ import (
 	protocols "github.com/giovaniif/e-commerce/protocols"
 )
 
+func NewCheckout(itemRepository item.ItemRepository, paymentGateway protocols.PaymentGateway) *Checkout {
+	return &Checkout{
+		itemRepository: itemRepository,
+		paymentGateway: paymentGateway,
+	}
+}
+
 func (c *Checkout) Checkout(input Input) (error) {
-	item := c.itemRepository.GetItem(input.itemId)
-	if item.Stock < input.quantity {
+	item := c.itemRepository.GetItem(input.ItemId)
+	if item.Stock < input.Quantity {
 		return errors.New("not enough stock")
 	}
-  item.RemoveStock(input.quantity)  
+  item.RemoveStock(input.Quantity)  
 	c.itemRepository.Save(item)
-	c.paymentGateway.Charge(item.Price * float64(input.quantity))
+	c.paymentGateway.Charge(item.Price * float64(input.Quantity))
 	return nil
 }
 
-type Input struct{
-	itemId int32
-	quantity int32
+type Input struct {
+	ItemId int32
+	Quantity int32
 }
 
 type Checkout struct {

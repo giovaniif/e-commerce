@@ -6,42 +6,42 @@ import (
 	item "github.com/giovaniif/e-commerce/domain/item"
 )
 
-type ItemRepositoryMock struct {
-	GetItemFunc func(itemId int32) item.Item
-	SaveFunc func(item item.Item)
+type mockItemRepository struct {
+	items map[int32]item.Item
+	saved []item.Item
 }
 
-func (m *ItemRepositoryMock) GetItem(itemId int32) item.Item {
-	return m.GetItemFunc(itemId)
+func (m *mockItemRepository) GetItem(itemId int32) item.Item {
+	return m.items[itemId]
 }
 
-func (m *ItemRepositoryMock) Save(item item.Item) {
-	m.SaveFunc(item)
+func (m *mockItemRepository) Save(it item.Item) {
+	m.saved = append(m.saved, it)
 }
 
-type PaymentGatewayMock struct {
-	ChargeFunc func(amount float64) error
+func (m *mockItemRepository) Create(it item.Item) {
+	if m.items == nil {
+		m.items = make(map[int32]item.Item)
+	}
+	m.items[it.Id] = it
 }
 
-func (m *PaymentGatewayMock) Charge(amount float64) error {
-	return m.ChargeFunc(amount)
+type mockPaymentGateway struct {
+	charged []float64
 }
+
+func (m *mockPaymentGateway) Charge(amount float64) error {
+	m.charged = append(m.charged, amount)
+	return nil
+}
+
 
 func TestCheckoutNotEnoughStock(t *testing.T) {
-	checkout := Checkout{
-		itemRepository: &ItemRepositoryMock{
-			GetItemFunc: func(itemId int32) item.Item {
-				return item.Item{Stock: 0}
-			},
-			SaveFunc: func(item item.Item) {},
-		},
-		paymentGateway: &PaymentGatewayMock{
-			ChargeFunc: func(amount float64) error {
-				return nil
-			},
-		},
-	}
-	err := checkout.Checkout(Input{itemId: 1, quantity: 1})
+	repo := &mockItemRepository{items: map[int32]item.Item{1: {Id: 1, Price: 10.0, Stock: 0}}}
+	payment := &mockPaymentGateway{}
+	checkoutUseCase := NewCheckout(repo, payment)
+
+	err := checkoutUseCase.Checkout(Input{ItemId: 1, Quantity: 1})
 	if err == nil {
 		t.Errorf("Expected error, got nil")
 	}
