@@ -3,7 +3,7 @@ package checkout
 import (
 	"testing"
 
-	item "github.com/giovaniif/e-commerce/domain/item"
+	item "github.com/giovaniif/e-commerce/order/domain/item"
 )
 
 type mockItemRepository struct {

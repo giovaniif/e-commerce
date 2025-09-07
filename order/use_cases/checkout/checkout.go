@@ -3,8 +3,8 @@ package checkout
 import (
 	"errors"
 
-	item "github.com/giovaniif/e-commerce/domain/item"
-	protocols "github.com/giovaniif/e-commerce/protocols"
+	item "github.com/giovaniif/e-commerce/order/domain/item"
+	protocols "github.com/giovaniif/e-commerce/order/protocols"
 )
 
 func NewCheckout(itemRepository item.ItemRepository, paymentGateway protocols.PaymentGateway) *Checkout {

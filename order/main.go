@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/giovaniif/e-commerce/cmd/api"
+	"github.com/giovaniif/e-commerce/order/cmd/api"
 )
 
 func main() {

@@ -4,10 +4,10 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/giovaniif/e-commerce/domain/item"
-	"github.com/giovaniif/e-commerce/infra/gateways"
-	"github.com/giovaniif/e-commerce/infra/repositories"
-	"github.com/giovaniif/e-commerce/use_cases/checkout"
+	"github.com/giovaniif/e-commerce/order/domain/item"
+	"github.com/giovaniif/e-commerce/order/infra/gateways"
+	"github.com/giovaniif/e-commerce/order/infra/repositories"
+	"github.com/giovaniif/e-commerce/order/use_cases/checkout"
 )
 
 func StartServer() {

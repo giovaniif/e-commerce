@@ -1,7 +1,7 @@
 package repositories
 
 import (
-	item "github.com/giovaniif/e-commerce/domain/item"
+	item "github.com/giovaniif/e-commerce/order/domain/item"
 )
 
 type ItemRepositoryMemory struct {
