@@ -11,8 +11,8 @@ type ItemRepository struct {
 	reservations map[int32]*item.Reservation
 }
 
-func NewItemRepository() *ItemRepository {
-	return &ItemRepository{items: make(map[int32]*item.Item), reservations: make(map[int32]*item.Reservation)}
+func NewItemRepository(items map[int32]*item.Item, reservations map[int32]*item.Reservation) *ItemRepository {
+	return &ItemRepository{items: items, reservations: reservations}
 }
 
 func (r *ItemRepository) GetItem(itemId int32) (*item.Item, error) {

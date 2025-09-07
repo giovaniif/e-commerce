@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/giovaniif/e-commerce/stock/domain/item"
 	"github.com/giovaniif/e-commerce/stock/infra/repositories"
 	"github.com/giovaniif/e-commerce/stock/use_cases/complete"
 	"github.com/giovaniif/e-commerce/stock/use_cases/release"
@@ -26,7 +27,10 @@ type CompleteRequest struct {
 }
 
 func StartServer() {
-	itemRepository := repositories.NewItemRepository()
+	items := make(map[int32]*item.Item)
+	items[0] = &item.Item{Id: 1, Price: 10, InitialStock: 10}
+	reservations := make(map[int32]*item.Reservation)
+	itemRepository := repositories.NewItemRepository(items, reservations)
 	reserveUseCase := reserve.NewReserve(itemRepository)
 	releaseUseCase := release.NewRelease(itemRepository)
 	completeUseCase := complete.NewComplete(itemRepository)
