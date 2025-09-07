@@ -16,20 +16,24 @@ func NewItemRepository() *ItemRepository {
 }
 
 func (r *ItemRepository) GetItem(itemId int32) (*item.Item, error) {
-	item, ok := r.items[itemId]
+	repositoryItem, ok := r.items[itemId]
 	if !ok {
 		return nil, errors.New("item not found")
 	}
-	return item, nil
+	var itemReservations []item.Reservation
+	for _, reservation := range r.reservations {
+		if reservation.ItemId == itemId {
+			itemReservations = append(itemReservations, *reservation)
+		}
+	}
+	repositoryItem.Reservations = itemReservations
+	return repositoryItem, nil
 }
 
 func (r *ItemRepository) Reserve(reservationItem *item.Item, quantity int32) (*item.Reservation, error) {
-	if reservationItem.Stock < quantity {
+	if reservationItem.GetAvailableStock() < quantity {
 		return nil, errors.New("insufficient stock")
 	}
-
-	reservationItem.Stock -= quantity
-	r.Save(reservationItem)
 
 	newId := int32(len(r.reservations) + 1)
 	reservation := &item.Reservation{
@@ -37,6 +41,7 @@ func (r *ItemRepository) Reserve(reservationItem *item.Item, quantity int32) (*i
 		TotalFee: float64(quantity) * reservationItem.Price,
 		Quantity: quantity,
 		ItemId: reservationItem.Id,
+		Status: "reserved",
 	}
 	r.reservations[newId] = reservation
 	return reservation, nil
@@ -47,22 +52,28 @@ func (r *ItemRepository) ReleaseReservation(reservationId int32) (error) {
 	if !ok {
 		return errors.New("reservation not found")
 	}
-  item, err := r.GetItem(reservation.ItemId)
-  if err != nil {
-    return err
-  }
-  item.Stock += reservation.Quantity
-  r.Save(item)
-	r.reservations[reservationId] = nil
+	r.reservations[reservationId] = &item.Reservation{
+		Id: reservationId,
+		TotalFee: reservation.TotalFee,
+		Quantity: reservation.Quantity,
+		ItemId: reservation.ItemId,
+		Status: "canceled",
+	}
   return nil
 }
 
 func (r *ItemRepository) CompleteReservation(reservationId int32) error {
-	_, ok := r.reservations[reservationId]
+	reservation, ok := r.reservations[reservationId]
 	if !ok {
 		return errors.New("reservation not found")
 	}
-	r.reservations[reservationId] = nil
+	r.reservations[reservationId] = &item.Reservation{
+		Id: reservationId,
+		TotalFee: reservation.TotalFee,
+		Quantity: reservation.Quantity,
+		ItemId: reservation.ItemId,
+		Status: "completed",
+	}
 	return nil
 }
 

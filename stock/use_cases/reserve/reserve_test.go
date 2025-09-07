@@ -47,7 +47,7 @@ func (m *mockRepository) CompleteReservation(reservationId int32) error {
 
 func TestReserve_Success(t *testing.T) {
 	repo := &mockRepository{
-		getItemResult: &stockitem.Item{Id: 1, Price: 10, Stock: 5},
+		getItemResult: &stockitem.Item{Id: 1, Price: 10, InitialStock: 5},
 		reserveResult: &stockitem.Reservation{Id: 2, TotalFee: 30, Quantity: 3, ItemId: 1},
 	}
 	uc := NewReserve(repo)
@@ -81,7 +81,7 @@ func TestReserve_GetItemError(t *testing.T) {
 
 func TestReserve_ReserveError(t *testing.T) {
 	repo := &mockRepository{
-		getItemResult: &stockitem.Item{Id: 1, Price: 10, Stock: 5},
+		getItemResult: &stockitem.Item{Id: 1, Price: 10, InitialStock: 5},
 		reserveErr: errors.New("cannot reserve"),
 	}
 	uc := NewReserve(repo)
