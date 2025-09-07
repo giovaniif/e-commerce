@@ -1,51 +1,127 @@
 package checkout
 
 import (
+	"errors"
 	"testing"
 
-	item "github.com/giovaniif/e-commerce/order/domain/item"
+	protocols "github.com/giovaniif/e-commerce/order/protocols"
 )
 
-type mockItemRepository struct {
-	items map[int32]item.Item
-	saved []item.Item
+type mockStockGateway struct {
+	reservedInputs    []struct{ itemId, quantity int32 }
+	reserveResult     *protocols.Reservation
+	reserveErr        error
+	releasedIds       []string
+	releaseErr        error
+	completedIds      []string
+	completeErr       error
 }
 
-func (m *mockItemRepository) GetItem(itemId int32) item.Item {
-	return m.items[itemId]
+func (m *mockStockGateway) Reserve(itemId int32, quantity int32) (*protocols.Reservation, error) {
+	m.reservedInputs = append(m.reservedInputs, struct{ itemId, quantity int32 }{itemId, quantity})
+	return m.reserveResult, m.reserveErr
 }
 
-func (m *mockItemRepository) Save(it item.Item) {
-	m.saved = append(m.saved, it)
+func (m *mockStockGateway) Release(reservationId string) error {
+	m.releasedIds = append(m.releasedIds, reservationId)
+	return m.releaseErr
 }
 
-func (m *mockItemRepository) Create(it item.Item) {
-	if m.items == nil {
-		m.items = make(map[int32]item.Item)
-	}
-	m.items[it.Id] = it
+func (m *mockStockGateway) Complete(reservationId string) error {
+	m.completedIds = append(m.completedIds, reservationId)
+	return m.completeErr
 }
 
 type mockPaymentGateway struct {
 	charged []float64
+	chargeErr error
 }
 
 func (m *mockPaymentGateway) Charge(amount float64) error {
 	m.charged = append(m.charged, amount)
-	return nil
+	return m.chargeErr
 }
 
-
-func TestCheckoutNotEnoughStock(t *testing.T) {
-	repo := &mockItemRepository{items: map[int32]item.Item{1: {Id: 1, Price: 10.0, Stock: 0}}}
+func TestCheckoutReserveError(t *testing.T) {
+	stock := &mockStockGateway{reserveErr: errors.New("reserve error")}
 	payment := &mockPaymentGateway{}
-	checkoutUseCase := NewCheckout(repo, payment)
+	uc := NewCheckout(stock, payment)
 
-	err := checkoutUseCase.Checkout(Input{ItemId: 1, Quantity: 1})
+	err := uc.Checkout(Input{ItemId: 1, Quantity: 2})
 	if err == nil {
-		t.Errorf("Expected error, got nil")
+		t.Fatalf("expected error, got nil")
 	}
-	if err.Error() != "not enough stock" {
-		t.Errorf("Expected error, got %v", err)
+	if len(stock.reservedInputs) != 1 {
+		t.Fatalf("expected Reserve to be called once, got %d", len(stock.reservedInputs))
+	}
+}
+
+func TestCheckoutChargeWithTotalFee(t *testing.T) {
+	stock := &mockStockGateway{reserveResult: &protocols.Reservation{Id: "res-1", TotalFee: 123.45}}
+	payment := &mockPaymentGateway{}
+	uc := NewCheckout(stock, payment)
+
+	_ = uc.Checkout(Input{ItemId: 1, Quantity: 2})
+	if len(payment.charged) != 1 {
+		t.Fatalf("expected Charge to be called once, got %d", len(payment.charged))
+	}
+	if payment.charged[0] != 123.45 {
+		t.Fatalf("expected Charge amount 123.45, got %v", payment.charged[0])
+	}
+}
+
+func TestCheckoutReleaseOnChargeFail(t *testing.T) {
+	stock := &mockStockGateway{reserveResult: &protocols.Reservation{Id: "res-2", TotalFee: 50}}
+	payment := &mockPaymentGateway{chargeErr: errors.New("charge error")}
+	uc := NewCheckout(stock, payment)
+
+	err := uc.Checkout(Input{ItemId: 1, Quantity: 2})
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+	if len(stock.releasedIds) != 1 || stock.releasedIds[0] != "res-2" {
+		t.Fatalf("expected Release called with res-2, got %v", stock.releasedIds)
+	}
+}
+
+func TestCheckoutCompleteCalled(t *testing.T) {
+	stock := &mockStockGateway{reserveResult: &protocols.Reservation{Id: "res-3", TotalFee: 10}}
+	payment := &mockPaymentGateway{}
+	uc := NewCheckout(stock, payment)
+
+	_ = uc.Checkout(Input{ItemId: 1, Quantity: 1})
+	if len(stock.completedIds) != 1 || stock.completedIds[0] != "res-3" {
+		t.Fatalf("expected Complete called with res-3, got %v", stock.completedIds)
+	}
+}
+
+func TestCheckoutReleaseOnCompleteFail(t *testing.T) {
+	stock := &mockStockGateway{reserveResult: &protocols.Reservation{Id: "res-4", TotalFee: 10}, completeErr: errors.New("complete error")}
+	payment := &mockPaymentGateway{}
+	uc := NewCheckout(stock, payment)
+
+	err := uc.Checkout(Input{ItemId: 1, Quantity: 1})
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+	if len(stock.releasedIds) != 1 || stock.releasedIds[0] != "res-4" {
+		t.Fatalf("expected Release called with res-4, got %v", stock.releasedIds)
+	}
+}
+
+func TestCheckoutSuccess(t *testing.T) {
+	stock := &mockStockGateway{reserveResult: &protocols.Reservation{Id: "res-5", TotalFee: 20}}
+	payment := &mockPaymentGateway{}
+	uc := NewCheckout(stock, payment)
+
+	err := uc.Checkout(Input{ItemId: 1, Quantity: 2})
+	if err != nil {
+		t.Fatalf("expected nil, got %v", err)
+	}
+	if len(payment.charged) != 1 || payment.charged[0] != 20 {
+		t.Fatalf("expected Charge called with 20, got %v", payment.charged)
+	}
+	if len(stock.completedIds) != 1 || stock.completedIds[0] != "res-5" {
+		t.Fatalf("expected Complete called with res-5, got %v", stock.completedIds)
 	}
 }

@@ -8,10 +8,14 @@ import (
 	"net/http"
 )
 
-type PaymentGatewayHttp struct {}
+type PaymentGatewayHttp struct {
+	httpClient *http.Client
+}
 
-func NewPaymentGatewayHttp() *PaymentGatewayHttp {
-	return &PaymentGatewayHttp{}
+func NewPaymentGatewayHttp(httpClient *http.Client) *PaymentGatewayHttp {
+	return &PaymentGatewayHttp{
+		httpClient: httpClient,
+	}
 }
 
 type ChargeRequest struct {
@@ -35,8 +39,7 @@ func (p *PaymentGatewayHttp) Charge(amount float64) error {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := p.httpClient.Do(req)
 	if err != nil {
 		fmt.Println("failed to do request")
 		return err

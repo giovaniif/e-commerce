@@ -5,9 +5,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/giovaniif/e-commerce/order/domain/item"
 	"github.com/giovaniif/e-commerce/order/infra/gateways"
-	"github.com/giovaniif/e-commerce/order/infra/repositories"
 	"github.com/giovaniif/e-commerce/order/use_cases/checkout"
 )
 
@@ -17,14 +15,10 @@ type CheckoutRequest struct {
 }
 
 func StartServer() {
-	itemRepository := repositories.NewItemRepositoryMemory()
-	paymentGateway := gateways.NewPaymentGatewayHttp()
-	checkoutUseCase := checkout.NewCheckout(itemRepository, paymentGateway)
-  itemRepository.Create(item.Item{
-    Id: 1,
-    Price: 10,
-    Stock: 10,
-  })
+	httpClient := &http.Client{}
+	stockGateway := gateways.NewStockGatewayHttp(httpClient)
+	paymentGateway := gateways.NewPaymentGatewayHttp(httpClient)
+	checkoutUseCase := checkout.NewCheckout(stockGateway, paymentGateway)
 
 	r := gin.Default()
 

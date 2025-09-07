@@ -1,32 +1,36 @@
 package checkout
 
 import (
-	"errors"
 	"fmt"
 
-	item "github.com/giovaniif/e-commerce/order/domain/item"
 	protocols "github.com/giovaniif/e-commerce/order/protocols"
 )
 
-func NewCheckout(itemRepository item.ItemRepository, paymentGateway protocols.PaymentGateway) *Checkout {
+func NewCheckout(stockGateway protocols.StockGateway, paymentGateway protocols.PaymentGateway) *Checkout {
 	return &Checkout{
-		itemRepository: itemRepository,
+		stockGateway: stockGateway,
 		paymentGateway: paymentGateway,
 	}
 }
 
 func (c *Checkout) Checkout(input Input) (error) {
-	item := c.itemRepository.GetItem(input.ItemId)
-	if item.Stock < input.Quantity {
-		return errors.New("not enough stock")
+  reservation, err := c.stockGateway.Reserve(input.ItemId, input.Quantity)
+	if err != nil {
+		fmt.Println("failed to reserve stock")
+		return err
 	}
 
-  item.RemoveStock(input.Quantity)  
-	c.itemRepository.Save(item)
-
-	err := c.paymentGateway.Charge(item.Price * float64(input.Quantity))
+	err = c.paymentGateway.Charge(reservation.TotalFee)
 	if err != nil {
 		fmt.Println("failed to charge")
+		c.stockGateway.Release(reservation.Id)
+		return err
+	}
+
+	err = c.stockGateway.Complete(reservation.Id)
+	if err != nil {
+		fmt.Println("failed to complete reservation")
+		c.stockGateway.Release(reservation.Id)
 		return err
 	}
 
@@ -39,6 +43,6 @@ type Input struct {
 }
 
 type Checkout struct {
-  itemRepository item.ItemRepository
+  stockGateway protocols.StockGateway
 	paymentGateway protocols.PaymentGateway
 }
