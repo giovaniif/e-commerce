@@ -28,7 +28,7 @@ type CompleteRequest struct {
 
 func StartServer() {
 	items := make(map[int32]*item.Item)
-	items[0] = &item.Item{Id: 1, Price: 10, InitialStock: 10}
+	items[1] = &item.Item{Id: 1, Price: 10, InitialStock: 10}
 	reservations := make(map[int32]*item.Reservation)
 	itemRepository := repositories.NewItemRepository(items, reservations)
 	reserveUseCase := reserve.NewReserve(itemRepository)
