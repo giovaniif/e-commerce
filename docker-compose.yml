@@ -1,0 +1,30 @@
+version: '3'
+
+services:
+  stock:
+    build: ./stock
+    container_name: stock
+    ports:
+      - "3133:3133"
+  payment:
+    build: ./payment
+    container_name: payment
+    ports:
+      - "3132:3132"
+  order:
+    build: ./order
+    container_name: order
+    ports:
+      - "3131:3131"
+  nginx:
+    image: nginx:latest
+    container_name: nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - stock
+      - payment
+      - order
+    

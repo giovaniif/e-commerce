@@ -34,7 +34,7 @@ type CompleteRequest struct {
 }
 
 func (s *StockGatewayHttp) Reserve(itemId int32, quantity int32) (*protocols.Reservation, error) {
-  url := "http://localhost:3133/reserve"
+  url := "http://stock:3133/reserve"
   payload := ReserveRequest{
     ItemId: itemId,
     Quantity: quantity,
@@ -68,7 +68,7 @@ func (s *StockGatewayHttp) Reserve(itemId int32, quantity int32) (*protocols.Res
 }
 
 func (s *StockGatewayHttp) Release(reservationId string) error {
-	url := "http://localhost:3133/release"
+	url := "http://stock:3133/release"
   payload := ReleaseRequest{
     ReservationId: reservationId,
   }
@@ -96,7 +96,7 @@ func (s *StockGatewayHttp) Release(reservationId string) error {
 }
 
 func (s *StockGatewayHttp) Complete(reservationId string) error {
-	url := "http://localhost:3133/complete"
+	url := "http://stock:3133/complete"
   payload := CompleteRequest{
     ReservationId: reservationId,
   }
