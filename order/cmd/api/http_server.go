@@ -6,7 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/giovaniif/e-commerce/order/infra/gateways"
-	"github.com/giovaniif/e-commerce/order/use_cases/checkout"
+	checkout "github.com/giovaniif/e-commerce/order/use_cases"
 )
 
 type CheckoutRequest struct {
