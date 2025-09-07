@@ -42,11 +42,11 @@ func StartServer() {
 			c.String(http.StatusBadRequest, err.Error())
 			return
 		}
-		_, err := reserveUseCase.Reserve(reserveRequest.ItemId, reserveRequest.Quantity)
+		reservation, err := reserveUseCase.Reserve(reserveRequest.ItemId, reserveRequest.Quantity)
 		if err != nil {
 			c.String(http.StatusInternalServerError, err.Error())
 		} else {
-			c.String(http.StatusOK, "Reserve successful")
+			c.JSON(http.StatusOK, gin.H{"reservationId": reservation.ReservationId, "totalFee": reservation.TotalFee})
 		}
 	})
 
@@ -67,13 +67,16 @@ func StartServer() {
 	r.POST("/complete", func(c *gin.Context) {
 		var completeRequest CompleteRequest
 		if err := c.ShouldBindJSON(&completeRequest); err != nil {
+			fmt.Println("failed to bind json")
 			c.String(http.StatusBadRequest, err.Error())
 			return
 		}
 		err := completeUseCase.Complete(complete.Input{ReservationId: completeRequest.ReservationId})
 		if err != nil {
+			fmt.Println("failed to complete stock")
 			c.String(http.StatusInternalServerError, err.Error())
 		} else {
+			fmt.Println("complete successful")
 			c.String(http.StatusOK, "Complete successful")
 		}
 	})

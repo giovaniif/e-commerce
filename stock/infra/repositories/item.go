@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/giovaniif/e-commerce/stock/domain/item"
 )
@@ -65,6 +66,7 @@ func (r *ItemRepository) ReleaseReservation(reservationId int32) (error) {
 func (r *ItemRepository) CompleteReservation(reservationId int32) error {
 	reservation, ok := r.reservations[reservationId]
 	if !ok {
+		fmt.Printf("reservation %d not found", reservationId)
 		return errors.New("reservation not found")
 	}
 	r.reservations[reservationId] = &item.Reservation{

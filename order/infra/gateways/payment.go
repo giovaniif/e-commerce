@@ -32,7 +32,8 @@ func (p *PaymentGatewayHttp) Charge(amount float64) error {
 		return err
 	}
 
-  url := "http://payment:3132/charge"
+  // url := "http://payment:3132/charge"
+  url := "http://localhost:3132/charge"
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(payloadBytes))
 	if err != nil {
 		fmt.Println("failed to create request")

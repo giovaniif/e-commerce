@@ -26,15 +26,21 @@ type ReserveRequest struct {
 }
 
 type ReleaseRequest struct {
-	ReservationId string `json:"reservationId"`
+	ReservationId int32 `json:"reservationId"`
 }
 
 type CompleteRequest struct {
-	ReservationId string `json:"reservationId"`
+	ReservationId int32 `json:"reservationId"`
+}
+
+type ReservationResponse struct {
+	ReservationId int32 `json:"reservationId"`
+	TotalFee float64 `json:"totalFee"`
 }
 
 func (s *StockGatewayHttp) Reserve(itemId int32, quantity int32) (*protocols.Reservation, error) {
-  url := "http://stock:3133/reserve"
+  // url := "http://stock:3133/reserve"
+  url := "http://localhost:3133/reserve"
   payload := ReserveRequest{
     ItemId: itemId,
     Quantity: quantity,
@@ -59,16 +65,21 @@ func (s *StockGatewayHttp) Reserve(itemId int32, quantity int32) (*protocols.Res
 	if resp.StatusCode != http.StatusOK {
 		return nil, errors.New("failed to reserve stock")
 	}
-	var reservation protocols.Reservation
+	var reservation ReservationResponse
 	err = json.NewDecoder(resp.Body).Decode(&reservation)
 	if err != nil {
+		fmt.Println("failed to decode response")
 		return nil, err
 	}
-	return &reservation, nil
+	return &protocols.Reservation{
+		Id: reservation.ReservationId,
+		TotalFee: reservation.TotalFee,
+	}, nil
 }
 
-func (s *StockGatewayHttp) Release(reservationId string) error {
-	url := "http://stock:3133/release"
+func (s *StockGatewayHttp) Release(reservationId int32) error {
+	// url := "http://stock:3133/release"
+  url := "http://localhost:3133/release"
   payload := ReleaseRequest{
     ReservationId: reservationId,
   }
@@ -95,8 +106,9 @@ func (s *StockGatewayHttp) Release(reservationId string) error {
 	return nil
 }
 
-func (s *StockGatewayHttp) Complete(reservationId string) error {
-	url := "http://stock:3133/complete"
+func (s *StockGatewayHttp) Complete(reservationId int32) error {
+	// url := "http://stock:3133/complete"
+  url := "http://localhost:3133/complete"
   payload := CompleteRequest{
     ReservationId: reservationId,
   }
@@ -118,6 +130,7 @@ func (s *StockGatewayHttp) Complete(reservationId string) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		fmt.Println("failed to complete stock")
 		return errors.New("failed to complete stock")
 	}
 	return nil

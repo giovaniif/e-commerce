@@ -27,6 +27,7 @@ func (c *Checkout) Checkout(input Input) (error) {
 		return err
 	}
 
+	fmt.Printf("completing reservation %d", reservation.Id)
 	err = c.stockGateway.Complete(reservation.Id)
 	if err != nil {
 		fmt.Println("failed to complete reservation")
