@@ -11,9 +11,15 @@ import (
 	"github.com/giovaniif/e-commerce/order/use_cases/checkout"
 )
 
+type CheckoutRequest struct {
+	ItemId int32 `json:"itemId"`
+	Quantity int32 `json:"quantity"`
+}
+
 func StartServer() {
 	itemRepository := repositories.NewItemRepositoryMemory()
 	paymentGateway := gateways.NewPaymentGatewayHttp()
+	checkoutUseCase := checkout.NewCheckout(itemRepository, paymentGateway)
   itemRepository.Create(item.Item{
     Id: 1,
     Price: 10,
@@ -23,21 +29,20 @@ func StartServer() {
 	r := gin.Default()
 
 	r.POST("/checkout", func(c *gin.Context) {
-		checkoutUseCase := checkout.NewCheckout(itemRepository, paymentGateway)
+		var checkoutRequest CheckoutRequest
+		if err := c.ShouldBindJSON(&checkoutRequest); err != nil {
+			c.String(http.StatusBadRequest, err.Error())
+			return
+		}
 		err := checkoutUseCase.Checkout(checkout.Input{
-			ItemId: 1,
-			Quantity: 1,
+			ItemId: checkoutRequest.ItemId,
+			Quantity: checkoutRequest.Quantity,
 		})
 		if err != nil {
 			c.String(http.StatusInternalServerError, err.Error())
 		} else {
 			c.String(http.StatusOK, "Checkout successful")
 		}
-	})
-
-	r.GET("/items", func(c *gin.Context) {
-		it := itemRepository.GetItem(1)
-		c.JSON(http.StatusOK, it)
 	})
 
 	r.Run(":3131")
