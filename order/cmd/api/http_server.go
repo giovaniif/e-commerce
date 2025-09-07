@@ -13,7 +13,7 @@ import (
 
 func StartServer() {
 	itemRepository := repositories.NewItemRepositoryMemory()
-	paymentGateway := gateways.NewPaymentGatewayMemory()
+	paymentGateway := gateways.NewPaymentGatewayHttp()
   itemRepository.Create(item.Item{
     Id: 1,
     Price: 10,

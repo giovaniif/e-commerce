@@ -2,6 +2,7 @@ package checkout
 
 import (
 	"errors"
+	"fmt"
 
 	item "github.com/giovaniif/e-commerce/order/domain/item"
 	protocols "github.com/giovaniif/e-commerce/order/protocols"
@@ -19,9 +20,16 @@ func (c *Checkout) Checkout(input Input) (error) {
 	if item.Stock < input.Quantity {
 		return errors.New("not enough stock")
 	}
+
   item.RemoveStock(input.Quantity)  
 	c.itemRepository.Save(item)
-	c.paymentGateway.Charge(item.Price * float64(input.Quantity))
+
+	err := c.paymentGateway.Charge(item.Price * float64(input.Quantity))
+	if err != nil {
+		fmt.Println("failed to charge")
+		return err
+	}
+
 	return nil
 }
 
