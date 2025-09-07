@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -40,4 +41,5 @@ func StartServer() {
 	})
 
 	r.Run(":3131")
+	fmt.Println("Order is running on port 3131")
 }
