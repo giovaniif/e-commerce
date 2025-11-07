@@ -16,15 +16,24 @@ type ChargeRequest struct {
 func StartServer() {
 	r := gin.Default()
 	chargeGateway := gateways.NewChargeGatewayMemory()
+	idempotencyGateway := gateways.NewIdempotencyGatewayMemory()
 
 	r.POST("/charge", func(c *gin.Context) {
-		chargeUseCase := charge.NewCharge(chargeGateway)
+		chargeUseCase := charge.NewCharge(chargeGateway, idempotencyGateway)
+		idempotencyKey := c.GetHeader("Idempotency-Key")
+		if idempotencyKey == "" {
+			c.String(http.StatusBadRequest, "Idempotency-Key header is required")
+			return
+		}
 		var chargeRequest ChargeRequest
 		if err := c.ShouldBindJSON(&chargeRequest); err != nil {
 			c.String(http.StatusBadRequest, err.Error())
 			return
 		}
-		err := chargeUseCase.Charge(chargeRequest.Amount)
+		err := chargeUseCase.Charge(charge.ChargeInput{
+			IdempotencyKey: idempotencyKey,
+			Amount:         chargeRequest.Amount,
+		})
 		if err != nil {
 			c.String(http.StatusInternalServerError, err.Error())
 		} else {
