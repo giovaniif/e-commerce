@@ -10,7 +10,7 @@ import (
 )
 
 type CheckoutRequest struct {
-	ItemId int32 `json:"itemId"`
+	ItemId   int32 `json:"itemId"`
 	Quantity int32 `json:"quantity"`
 }
 
@@ -18,7 +18,8 @@ func StartServer() {
 	httpClient := &http.Client{}
 	stockGateway := gateways.NewStockGatewayHttp(httpClient)
 	paymentGateway := gateways.NewPaymentGatewayHttp(httpClient)
-	checkoutUseCase := checkout.NewCheckout(stockGateway, paymentGateway)
+	checkoutGateway := gateways.NewCheckoutGatewayMemory()
+	checkoutUseCase := checkout.NewCheckout(stockGateway, paymentGateway, checkoutGateway)
 
 	r := gin.Default()
 
@@ -28,9 +29,15 @@ func StartServer() {
 			c.String(http.StatusBadRequest, err.Error())
 			return
 		}
+		idempotencyKey := c.GetHeader("Idempotency-Key")
+		if idempotencyKey == "" {
+			c.String(http.StatusBadRequest, "Idempotency-Key header is required")
+			return
+		}
 		err := checkoutUseCase.Checkout(checkout.Input{
-			ItemId: checkoutRequest.ItemId,
-			Quantity: checkoutRequest.Quantity,
+			ItemId:         checkoutRequest.ItemId,
+			Quantity:       checkoutRequest.Quantity,
+			IdempotencyKey: idempotencyKey,
 		})
 		if err != nil {
 			c.String(http.StatusInternalServerError, err.Error())
