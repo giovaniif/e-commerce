@@ -2,8 +2,15 @@ package checkout
 
 import (
 	"fmt"
+	"math"
+	"time"
 
 	protocols "github.com/giovaniif/e-commerce/order/protocols"
+)
+
+var (
+	MAX_RETRIES = 5
+	BASE_DELAY  = 1 * time.Second
 )
 
 func NewCheckout(stockGateway protocols.StockGateway, paymentGateway protocols.PaymentGateway, checkoutGateway protocols.CheckoutGateway) *Checkout {
@@ -17,7 +24,6 @@ func NewCheckout(stockGateway protocols.StockGateway, paymentGateway protocols.P
 func (c *Checkout) Checkout(input Input) error {
 	result, err := c.checkoutGateway.ReserveIdempotencyKey(input.IdempotencyKey)
 	if err != nil {
-		fmt.Println("failed to check idempotency key")
 		return err
 	}
 	if result != nil {
@@ -33,9 +39,13 @@ func (c *Checkout) Checkout(input Input) error {
 		}
 	}()
 
-	reservation, err := c.stockGateway.Reserve(input.ItemId, input.Quantity)
+	reservationOperation := func() (*protocols.Reservation, error) {
+		reservation, reservationError := c.stockGateway.Reserve(input.ItemId, input.Quantity)
+		return reservation, reservationError
+	}
+	wrappedOperation := RetryWithBackoff(reservationOperation)
+	reservation, err := wrappedOperation()
 	if err != nil {
-		fmt.Println("failed to reserve stock")
 		return err
 	}
 
@@ -56,6 +66,30 @@ func (c *Checkout) Checkout(input Input) error {
 
 	success = true
 	return nil
+}
+
+type RetryFunc func() (*protocols.Reservation, error)
+
+func RetryWithBackoff(operation RetryFunc) RetryFunc {
+	return func() (*protocols.Reservation, error) {
+		var lastError error
+
+		for i := 0; i < MAX_RETRIES; i++ {
+			val, err := operation()
+
+			if err == nil {
+				return val, err
+			}
+
+			secRetry := math.Pow(2, float64(i))
+			fmt.Printf("Retrying operation in %f seconds\n", secRetry)
+			delay := time.Duration(secRetry) * BASE_DELAY
+			time.Sleep(delay)
+			lastError = err
+		}
+
+		return nil, lastError
+	}
 }
 
 type Input struct {
