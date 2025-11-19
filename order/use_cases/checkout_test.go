@@ -3,6 +3,7 @@ package checkout
 import (
 	"errors"
 	"testing"
+	"time"
 
 	protocols "github.com/giovaniif/e-commerce/order/protocols"
 )
@@ -67,17 +68,24 @@ func (m *mockCheckoutGateway) MarkFailure(idempotencyKey string) error {
 	return nil
 }
 
+type MockSleeper struct{}
+
+func (m *MockSleeper) Sleep(duration time.Duration) {
+	// no-op
+}
+
 func TestCheckoutReserveError(t *testing.T) {
 	stock := &mockStockGateway{reserveErr: errors.New("reserve error")}
 	payment := &mockPaymentGateway{}
 	checkoutGateway := &mockCheckoutGateway{}
-	uc := NewCheckout(stock, payment, checkoutGateway)
+	sleeper := &MockSleeper{}
+	uc := NewCheckout(stock, payment, checkoutGateway, sleeper)
 
 	err := uc.Checkout(Input{ItemId: 1, Quantity: 2, IdempotencyKey: "123"})
 	if err == nil {
 		t.Fatalf("expected error, got nil")
 	}
-	if len(stock.reservedInputs) != 1 {
+	if len(stock.reservedInputs) != 5 {
 		t.Fatalf("expected Reserve to be called once, got %d", len(stock.reservedInputs))
 	}
 	if !checkoutGateway.markFailureCalled {
@@ -92,7 +100,8 @@ func TestCheckoutChargeWithTotalFee(t *testing.T) {
 	stock := &mockStockGateway{reserveResult: &protocols.Reservation{Id: 1, TotalFee: 123.45}}
 	payment := &mockPaymentGateway{}
 	checkoutGateway := &mockCheckoutGateway{}
-	uc := NewCheckout(stock, payment, checkoutGateway)
+	sleeper := &MockSleeper{}
+	uc := NewCheckout(stock, payment, checkoutGateway, sleeper)
 
 	_ = uc.Checkout(Input{ItemId: 1, Quantity: 2, IdempotencyKey: "123"})
 	if len(payment.charged) != 1 {
@@ -107,7 +116,8 @@ func TestCheckoutReleaseOnChargeFail(t *testing.T) {
 	stock := &mockStockGateway{reserveResult: &protocols.Reservation{Id: 2, TotalFee: 50}}
 	payment := &mockPaymentGateway{chargeErr: errors.New("charge error")}
 	checkoutGateway := &mockCheckoutGateway{}
-	uc := NewCheckout(stock, payment, checkoutGateway)
+	sleeper := &MockSleeper{}
+	uc := NewCheckout(stock, payment, checkoutGateway, sleeper)
 
 	err := uc.Checkout(Input{ItemId: 1, Quantity: 2, IdempotencyKey: "123"})
 	if err == nil {
@@ -122,7 +132,8 @@ func TestCheckoutCompleteCalled(t *testing.T) {
 	stock := &mockStockGateway{reserveResult: &protocols.Reservation{Id: 3, TotalFee: 10}}
 	payment := &mockPaymentGateway{}
 	checkoutGateway := &mockCheckoutGateway{}
-	uc := NewCheckout(stock, payment, checkoutGateway)
+	sleeper := &MockSleeper{}
+	uc := NewCheckout(stock, payment, checkoutGateway, sleeper)
 
 	_ = uc.Checkout(Input{ItemId: 1, Quantity: 1, IdempotencyKey: "123"})
 	if len(stock.completedIds) != 1 || stock.completedIds[0] != 3 {
@@ -134,7 +145,8 @@ func TestCheckoutReleaseOnCompleteFail(t *testing.T) {
 	stock := &mockStockGateway{reserveResult: &protocols.Reservation{Id: 4, TotalFee: 10}, completeErr: errors.New("complete error")}
 	payment := &mockPaymentGateway{}
 	checkoutGateway := &mockCheckoutGateway{}
-	uc := NewCheckout(stock, payment, checkoutGateway)
+	sleeper := &MockSleeper{}
+	uc := NewCheckout(stock, payment, checkoutGateway, sleeper)
 
 	err := uc.Checkout(Input{ItemId: 1, Quantity: 1, IdempotencyKey: "123"})
 	if err == nil {
@@ -149,7 +161,8 @@ func TestCheckoutSuccess(t *testing.T) {
 	stock := &mockStockGateway{reserveResult: &protocols.Reservation{Id: 5, TotalFee: 20}}
 	payment := &mockPaymentGateway{}
 	checkoutGateway := &mockCheckoutGateway{}
-	uc := NewCheckout(stock, payment, checkoutGateway)
+	sleeper := &MockSleeper{}
+	uc := NewCheckout(stock, payment, checkoutGateway, sleeper)
 
 	err := uc.Checkout(Input{ItemId: 1, Quantity: 2, IdempotencyKey: "123"})
 	if err != nil {
@@ -175,7 +188,8 @@ func TestCheckoutWithExistingIdempotencyKey(t *testing.T) {
 	checkoutGateway := &mockCheckoutGateway{
 		reserveIdempotencyKeyErr: errors.New("idempotency key is already being processed"),
 	}
-	uc := NewCheckout(stock, payment, checkoutGateway)
+	sleeper := &MockSleeper{}
+	uc := NewCheckout(stock, payment, checkoutGateway, sleeper)
 
 	err := uc.Checkout(Input{ItemId: 1, Quantity: 2, IdempotencyKey: "123"})
 	if err == nil {
@@ -195,7 +209,8 @@ func TestCheckoutWithSuccessfulIdempotencyKey(t *testing.T) {
 			Error:   nil,
 		},
 	}
-	uc := NewCheckout(stock, payment, checkoutGateway)
+	sleeper := &MockSleeper{}
+	uc := NewCheckout(stock, payment, checkoutGateway, sleeper)
 
 	err := uc.Checkout(Input{ItemId: 1, Quantity: 2, IdempotencyKey: "abc-123"})
 	if err != nil {
@@ -224,7 +239,8 @@ func TestCheckoutWithProcessingIdempotencyKey(t *testing.T) {
 	checkoutGateway := &mockCheckoutGateway{
 		reserveIdempotencyKeyErr: errors.New("idempotency key is already being processed"),
 	}
-	uc := NewCheckout(stock, payment, checkoutGateway)
+	sleeper := &MockSleeper{}
+	uc := NewCheckout(stock, payment, checkoutGateway, sleeper)
 
 	err := uc.Checkout(Input{ItemId: 1, Quantity: 2, IdempotencyKey: "xyz-456"})
 	if err == nil {
@@ -245,7 +261,8 @@ func TestCheckoutMarkFailureOnReserveError(t *testing.T) {
 	stock := &mockStockGateway{reserveErr: errors.New("reserve error")}
 	payment := &mockPaymentGateway{}
 	checkoutGateway := &mockCheckoutGateway{}
-	uc := NewCheckout(stock, payment, checkoutGateway)
+	sleeper := &MockSleeper{}
+	uc := NewCheckout(stock, payment, checkoutGateway, sleeper)
 
 	err := uc.Checkout(Input{ItemId: 1, Quantity: 2, IdempotencyKey: "fail-1"})
 	if err == nil {
@@ -263,7 +280,8 @@ func TestCheckoutMarkFailureOnChargeError(t *testing.T) {
 	stock := &mockStockGateway{reserveResult: &protocols.Reservation{Id: 9, TotalFee: 50}}
 	payment := &mockPaymentGateway{chargeErr: errors.New("charge error")}
 	checkoutGateway := &mockCheckoutGateway{}
-	uc := NewCheckout(stock, payment, checkoutGateway)
+	sleeper := &MockSleeper{}
+	uc := NewCheckout(stock, payment, checkoutGateway, sleeper)
 
 	err := uc.Checkout(Input{ItemId: 1, Quantity: 2, IdempotencyKey: "fail-2"})
 	if err == nil {
@@ -284,7 +302,8 @@ func TestCheckoutMarkFailureOnCompleteError(t *testing.T) {
 	}
 	payment := &mockPaymentGateway{}
 	checkoutGateway := &mockCheckoutGateway{}
-	uc := NewCheckout(stock, payment, checkoutGateway)
+	sleeper := &MockSleeper{}
+	uc := NewCheckout(stock, payment, checkoutGateway, sleeper)
 
 	err := uc.Checkout(Input{ItemId: 1, Quantity: 2, IdempotencyKey: "fail-3"})
 	if err == nil {
@@ -302,7 +321,8 @@ func TestCheckoutMarkSuccessOnCompleteSuccess(t *testing.T) {
 	stock := &mockStockGateway{reserveResult: &protocols.Reservation{Id: 11, TotalFee: 70}}
 	payment := &mockPaymentGateway{}
 	checkoutGateway := &mockCheckoutGateway{}
-	uc := NewCheckout(stock, payment, checkoutGateway)
+	sleeper := &MockSleeper{}
+	uc := NewCheckout(stock, payment, checkoutGateway, sleeper)
 
 	err := uc.Checkout(Input{ItemId: 1, Quantity: 2, IdempotencyKey: "success-1"})
 	if err != nil {

@@ -19,7 +19,8 @@ func StartServer() {
 	stockGateway := gateways.NewStockGatewayHttp(httpClient)
 	paymentGateway := gateways.NewPaymentGatewayHttp(httpClient)
 	checkoutGateway := gateways.NewCheckoutGatewayMemory()
-	checkoutUseCase := checkout.NewCheckout(stockGateway, paymentGateway, checkoutGateway)
+	sleeperGateway := gateways.NewSleeper()
+	checkoutUseCase := checkout.NewCheckout(stockGateway, paymentGateway, checkoutGateway, sleeperGateway)
 
 	r := gin.Default()
 
