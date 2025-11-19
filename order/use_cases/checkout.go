@@ -13,11 +13,12 @@ var (
 	BASE_DELAY  = 1 * time.Second
 )
 
-func NewCheckout(stockGateway protocols.StockGateway, paymentGateway protocols.PaymentGateway, checkoutGateway protocols.CheckoutGateway) *Checkout {
+func NewCheckout(stockGateway protocols.StockGateway, paymentGateway protocols.PaymentGateway, checkoutGateway protocols.CheckoutGateway, sleeper protocols.Sleeper) *Checkout {
 	return &Checkout{
 		stockGateway:    stockGateway,
 		paymentGateway:  paymentGateway,
 		checkoutGateway: checkoutGateway,
+		sleeper: sleeper,
 	}
 }
 
@@ -43,7 +44,7 @@ func (c *Checkout) Checkout(input Input) error {
 		reservation, reservationError := c.stockGateway.Reserve(input.ItemId, input.Quantity)
 		return reservation, reservationError
 	}
-	wrappedOperation := RetryWithBackoff(reservationOperation)
+	wrappedOperation := RetryWithBackoff(reservationOperation, c.sleeper)
 	reservation, err := wrappedOperation()
 	if err != nil {
 		return err
@@ -70,8 +71,8 @@ func (c *Checkout) Checkout(input Input) error {
 
 type RetryFunc func() (*protocols.Reservation, error)
 
-func RetryWithBackoff(operation RetryFunc) RetryFunc {
-	return func() (*protocols.Reservation, error) {
+func RetryWithBackoff(operation RetryFunc, sleeper protocols.Sleeper) RetryFunc {
+    return func() (*protocols.Reservation, error) {
 		var lastError error
 
 		for i := 0; i < MAX_RETRIES; i++ {
@@ -84,7 +85,7 @@ func RetryWithBackoff(operation RetryFunc) RetryFunc {
 			secRetry := math.Pow(2, float64(i))
 			fmt.Printf("Retrying operation in %f seconds\n", secRetry)
 			delay := time.Duration(secRetry) * BASE_DELAY
-			time.Sleep(delay)
+			sleeper.Sleep(delay)
 			lastError = err
 		}
 
@@ -102,4 +103,5 @@ type Checkout struct {
 	stockGateway    protocols.StockGateway
 	paymentGateway  protocols.PaymentGateway
 	checkoutGateway protocols.CheckoutGateway
+	sleeper         protocols.Sleeper
 }
