@@ -6,7 +6,7 @@ type Reservation struct {
 }
 
 type StockGateway interface {
-	Reserve(itemId int32, quantity int32) (*Reservation, error)
+  Reserve(itemId int32, quantity int32) (*Reservation, error)
   Release(reservationId int32) error
-	Complete(reservationId int32) error
+  Complete(reservationId int32) error
 }

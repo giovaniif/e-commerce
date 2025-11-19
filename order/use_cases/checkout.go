@@ -18,7 +18,7 @@ func NewCheckout(stockGateway protocols.StockGateway, paymentGateway protocols.P
 		stockGateway:    stockGateway,
 		paymentGateway:  paymentGateway,
 		checkoutGateway: checkoutGateway,
-		sleeper: sleeper,
+		sleeper:         sleeper,
 	}
 }
 
@@ -27,7 +27,8 @@ func (c *Checkout) Checkout(input Input) error {
 	if err != nil {
 		return err
 	}
-	if result != nil {
+	keyBeingProcessed := result != nil
+	if keyBeingProcessed {
 		return nil
 	}
 
@@ -52,16 +53,27 @@ func (c *Checkout) Checkout(input Input) error {
 
 	err = c.paymentGateway.Charge(reservation.TotalFee)
 	if err != nil {
-		fmt.Println("failed to charge")
 		c.stockGateway.Release(reservation.Id)
 		return err
 	}
 
-	fmt.Printf("completing reservation %d", reservation.Id)
-	err = c.stockGateway.Complete(reservation.Id)
+	completeStockOperation := RetryWithBackoff(func() (*protocols.Reservation, error) {
+		err := c.stockGateway.Complete(reservation.Id)
+		
+		return nil, err
+	}, c.sleeper)
+	_, err = completeStockOperation()
+
 	if err != nil {
-		fmt.Println("failed to complete reservation")
-		c.stockGateway.Release(reservation.Id)
+		releaseStockOperation := RetryWithBackoff(func() (*protocols.Reservation, error) {
+			err := c.stockGateway.Release(reservation.Id)
+			return nil, err
+		}, c.sleeper)
+		_, releaseStockError := releaseStockOperation()
+		if releaseStockError != nil {
+			fmt.Printf("Failed to release stock for reservation after complete error %d: %v\n", reservation.Id, releaseStockError)
+			return releaseStockError
+		}
 		return err
 	}
 
@@ -72,7 +84,7 @@ func (c *Checkout) Checkout(input Input) error {
 type RetryFunc func() (*protocols.Reservation, error)
 
 func RetryWithBackoff(operation RetryFunc, sleeper protocols.Sleeper) RetryFunc {
-    return func() (*protocols.Reservation, error) {
+	return func() (*protocols.Reservation, error) {
 		var lastError error
 
 		for i := 0; i < MAX_RETRIES; i++ {
