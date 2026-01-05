@@ -58,16 +58,15 @@ func (c *Checkout) Checkout(input Input) error {
 	}
 
 	completeStockOperation := RetryWithBackoff(func() (*protocols.Reservation, error) {
-		err := c.stockGateway.Complete(reservation.Id)
-		
-		return nil, err
+		completeStockError := c.stockGateway.Complete(reservation.Id)
+
+		return nil, completeStockError
 	}, c.sleeper)
 	_, err = completeStockOperation()
-
 	if err != nil {
 		releaseStockOperation := RetryWithBackoff(func() (*protocols.Reservation, error) {
-			err := c.stockGateway.Release(reservation.Id)
-			return nil, err
+			releaseStockError := c.stockGateway.Release(reservation.Id)
+			return nil, releaseStockError
 		}, c.sleeper)
 		_, releaseStockError := releaseStockOperation()
 		if releaseStockError != nil {
