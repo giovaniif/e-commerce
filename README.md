@@ -5,7 +5,7 @@
 Este é um **projeto de estudos** focado em explorar conceitos fundamentais de sistemas distribuídos:
 
 - **Idempotência**: Garantir que operações possam ser executadas múltiplas vezes sem efeitos colaterais
-- **Tolerância a Falhas**: Sistema resiliente que continua funcionando mesmo quando componentes falham
+- **Tolerância a Falhas**: Sistema resiliente que continua funcionando mesmo quando componentes falham (inclui **retry com backoff exponencial** onde necessário)
 - **Escalabilidade**: Arquitetura preparada para crescer e lidar com aumento de carga
 
 O projeto simula um sistema de e-commerce com três serviços independentes que trabalham juntos para processar pedidos, gerenciar estoque e processar pagamentos.
@@ -367,6 +367,13 @@ curl -X POST http://localhost/order/checkout \
   - [x] Diagramas de arquitetura
   - [x] Fluxos de execução
 
+### ✅ Backoff Exponencial (Tolerância a Falhas)
+
+- [x] **Order Service – chamadas ao Stock**
+  - [x] Retry com backoff exponencial em: reserva de estoque (`Reserve`), conclusão da reserva (`Complete`) e liberação em caso de falha (`Release`)
+  - [x] Até 5 tentativas com delay exponencial (1s → 2s → 4s → 8s → 16s)
+  - [x] Implementado em `order/use_cases/checkout.go` via `RetryWithBackoff`
+
 ### ⚠️ Pendente: Melhorias no Stock Service
 
 - [ ] Tornar `/release` idempotente (verificar estado)
@@ -379,17 +386,17 @@ curl -X POST http://localhost/order/checkout \
 
 ### 🔄 Tolerância a Falhas
 
-#### 1. Retry com Backoff Exponencial
-**Objetivo**: Recuperar automaticamente de falhas transitórias
+#### 1. Retry com Backoff Exponencial ✅ Implementado
+**Objetivo**: Recuperar automaticamente de falhas transitórias nas chamadas ao Stock Service.
 
-**Implementação**:
-- Adicionar retry nos gateways HTTP (`StockGatewayHttp`, `PaymentGatewayHttp`)
-- Backoff exponencial: 100ms → 200ms → 400ms → 800ms
-- Retry apenas em erros retryáveis (5xx, timeouts)
+**Implementação** (já em uso):
+- Retry com backoff exponencial nas operações de estoque no **Order Service**: `Reserve`, `Complete` e `Release` (em cenário de compensação)
+- Até 5 tentativas com delay exponencial: 1s → 2s → 4s → 8s → 16s
+- Código em `order/use_cases/checkout.go` (`RetryWithBackoff` + `Sleeper` injetável para testes)
 
 **Benefícios**:
-- Sistema mais resiliente a falhas de rede
-- Melhora a experiência do usuário
+- Sistema mais resiliente a falhas de rede ou indisponibilidade temporária do Stock
+- Melhora a experiência do usuário em cenários de falha transitória
 
 #### 2. Circuit Breaker
 **Objetivo**: Evitar sobrecarga em serviços degradados
@@ -535,8 +542,10 @@ go test ./... -v
 
 ### Tolerância a Falhas
 
+**Implementado**:
+- **Retry com backoff exponencial** nas chamadas ao Stock (reserva, complete, release) no fluxo de checkout
+
 **Conceitos a explorar**:
-- Retry com backoff
 - Circuit breaker
 - Timeout e cancelamento
 - Compensação (Saga)
