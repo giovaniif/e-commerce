@@ -5,7 +5,7 @@
 Este é um **projeto de estudos** focado em explorar conceitos fundamentais de sistemas distribuídos:
 
 - **Idempotência**: Garantir que operações possam ser executadas múltiplas vezes sem efeitos colaterais
-- **Tolerância a Falhas**: Sistema resiliente que continua funcionando mesmo quando componentes falham (inclui **retry com backoff exponencial** onde necessário)
+- **Tolerância a Falhas**: Sistema resiliente que continua funcionando mesmo quando componentes falham (inclui **retry com backoff exponencial** e **timeout e propagação de context** onde necessário)
 - **Escalabilidade**: Arquitetura preparada para crescer e lidar com aumento de carga
 
 O projeto simula um sistema de e-commerce com três serviços independentes que trabalham juntos para processar pedidos, gerenciar estoque e processar pagamentos.
@@ -374,6 +374,20 @@ curl -X POST http://localhost/order/checkout \
   - [x] Até 5 tentativas com delay exponencial (1s → 2s → 4s → 8s → 16s)
   - [x] Implementado em `order/use_cases/checkout.go` via `RetryWithBackoff`
 
+### ✅ Timeout e Context Propagation (Tolerância a Falhas)
+
+- [x] **Handler (Order Service)**
+  - [x] Timeout configurável via `CHECKOUT_TIMEOUT_SECONDS` (default 30s)
+  - [x] `context.WithTimeout` a partir de `c.Request.Context()` e repasse ao use case
+- [x] **Use case e retry**
+  - [x] `Checkout(ctx, input)`; checagem de `ctx.Err()` no início e no retry (antes de dormir)
+  - [x] Context propagado em todas as chamadas aos gateways (Stock, Payment, Checkout)
+- [x] **Gateways**
+  - [x] Stock, Payment e Checkout: todos os métodos com `ctx context.Context` como primeiro parâmetro
+  - [x] HTTP: `NewRequestWithContext(ctx, ...)` e checagem de `ctx.Err()` no início
+- [x] **Resposta HTTP**
+  - [x] 504 (Gateway Timeout) para `context.DeadlineExceeded`; 500 para demais erros
+
 ### ⚠️ Pendente: Melhorias no Stock Service
 
 - [ ] Tornar `/release` idempotente (verificar estado)
@@ -411,17 +425,18 @@ curl -X POST http://localhost/order/checkout \
 - Fail-fast quando serviço está indisponível
 - Protege serviços saudáveis de sobrecarga
 
-#### 3. Timeout e Context Propagation
-**Objetivo**: Evitar requisições travadas indefinidamente
+#### 3. Timeout e Context Propagation ✅ Implementado
+**Objetivo**: Evitar requisições travadas indefinidamente.
 
-**Implementação**:
-- Timeouts configuráveis nos HTTP clients
-- Uso de `context.Context` para cancelamento
-- Propagação de context entre serviços
+**Implementação** (já em uso):
+- Timeout do checkout configurável via `CHECKOUT_TIMEOUT_SECONDS`; `context.WithTimeout` no handler e repasse ao use case
+- Uso de `context.Context` em todos os gateways (Stock, Payment, Checkout) e checagem de `ctx.Err()` no início e no retry
+- Propagação do context do handler até as chamadas HTTP (`NewRequestWithContext`)
+- Resposta 504 para timeout (`context.DeadlineExceeded`)
 
 **Benefícios**:
-- Evita travamentos
-- Melhor controle de tempo de resposta
+- Evita travamentos; requisições respeitam o tempo máximo configurado
+- Melhor controle de tempo de resposta e cancelamento em cascata
 
 #### 4. Saga Pattern para Transações Distribuídas
 **Objetivo**: Garantir consistência eventual em caso de falhas
@@ -544,10 +559,10 @@ go test ./... -v
 
 **Implementado**:
 - **Retry com backoff exponencial** nas chamadas ao Stock (reserva, complete, release) no fluxo de checkout
+- **Timeout e propagação de context** no checkout (handler → use case → gateways; 504 para timeout)
 
 **Conceitos a explorar**:
 - Circuit breaker
-- Timeout e cancelamento
 - Compensação (Saga)
 
 ### Escalabilidade
