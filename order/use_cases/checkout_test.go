@@ -86,8 +86,8 @@ func TestCheckoutReserveError(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error, got nil")
 	}
-	if len(stock.reservedInputs) != 5 {
-		t.Fatalf("expected Reserve to be called once, got %d", len(stock.reservedInputs))
+	if len(stock.reservedInputs) != 1 {
+		t.Fatalf("expected Reserve to be called once (no retry on non-retriable error), got %d", len(stock.reservedInputs))
 	}
 	if !checkoutGateway.markFailureCalled {
 		t.Fatalf("expected MarkFailure to be called")

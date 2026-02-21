@@ -6,20 +6,25 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 
-	infra "github.com/giovaniif/e-commerce/order/infra"
+	infra 	"github.com/giovaniif/e-commerce/order/infra"
 	"github.com/giovaniif/e-commerce/order/infra/requestid"
+	"github.com/giovaniif/e-commerce/order/infra/tracing"
 	protocols "github.com/giovaniif/e-commerce/order/protocols"
 )
 
 type StockGatewayHttp struct {
 	httpClient *http.Client
+	baseURL    string
 }
 
-func NewStockGatewayHttp(httpClient *http.Client) *StockGatewayHttp {
+func NewStockGatewayHttp(httpClient *http.Client, baseURL string) *StockGatewayHttp {
 	return &StockGatewayHttp{
 		httpClient: httpClient,
+		baseURL:    baseURL,
 	}
 }
 
@@ -46,8 +51,7 @@ func (s *StockGatewayHttp) Reserve(ctx context.Context, itemId int32, quantity i
 		return nil, ctx.Err()
 	}
 
-	// url := "http://stock:3133/reserve"
-	url := "http://localhost:3133/reserve"
+	reqURL, _ := url.JoinPath(s.baseURL, "reserve")
 	payload := ReserveRequest{
 		ItemId:   itemId,
 		Quantity: quantity,
@@ -56,7 +60,7 @@ func (s *StockGatewayHttp) Reserve(ctx context.Context, itemId int32, quantity i
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(payloadBytes))
+	req, err := http.NewRequestWithContext(ctx, "POST", reqURL, bytes.NewBuffer(payloadBytes))
 	if err != nil {
 		return nil, err
 	}
@@ -64,11 +68,13 @@ func (s *StockGatewayHttp) Reserve(ctx context.Context, itemId int32, quantity i
 	if id := requestid.FromContext(ctx); id != "" {
 		req.Header.Set("X-Request-ID", id)
 	}
+	tracing.Inject(ctx, req.Header)
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("reserve stock request failed: %w", err)
 	}
 	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode == http.StatusGatewayTimeout {
 		return nil, infra.NewTimeoutError("timeout reserving stock")
 	}
@@ -76,10 +82,10 @@ func (s *StockGatewayHttp) Reserve(ctx context.Context, itemId int32, quantity i
 		return nil, infra.NewNetworkError("network error reserving stock")
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, errors.New("failed to reserve stock")
+		return nil, fmt.Errorf("failed to reserve stock (status %d): %s", resp.StatusCode, string(body))
 	}
 	var reservation ReservationResponse
-	err = json.NewDecoder(resp.Body).Decode(&reservation)
+	err = json.Unmarshal(body, &reservation)
 	if err != nil {
 		return nil, err
 	}
@@ -94,8 +100,7 @@ func (s *StockGatewayHttp) Release(ctx context.Context, reservationId int32) err
 		return ctx.Err()
 	}
 
-	// url := "http://stock:3133/release"
-	url := "http://localhost:3133/release"
+	reqURL, _ := url.JoinPath(s.baseURL, "release")
 	payload := ReleaseRequest{
 		ReservationId: reservationId,
 	}
@@ -104,7 +109,7 @@ func (s *StockGatewayHttp) Release(ctx context.Context, reservationId int32) err
 		fmt.Println("failed to marshal payload")
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(payloadBytes))
+	req, err := http.NewRequestWithContext(ctx, "POST", reqURL, bytes.NewBuffer(payloadBytes))
 	if err != nil {
 		fmt.Println("failed to create request")
 		return err
@@ -113,6 +118,7 @@ func (s *StockGatewayHttp) Release(ctx context.Context, reservationId int32) err
 	if id := requestid.FromContext(ctx); id != "" {
 		req.Header.Set("X-Request-ID", id)
 	}
+	tracing.Inject(ctx, req.Header)
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		fmt.Println("failed to do request")
@@ -130,8 +136,7 @@ func (s *StockGatewayHttp) Complete(ctx context.Context, reservationId int32) er
 		return ctx.Err()
 	}
 
-	// url := "http://stock:3133/complete"
-	url := "http://localhost:3133/complete"
+	reqURL, _ := url.JoinPath(s.baseURL, "complete")
 	payload := CompleteRequest{
 		ReservationId: reservationId,
 	}
@@ -140,7 +145,7 @@ func (s *StockGatewayHttp) Complete(ctx context.Context, reservationId int32) er
 		fmt.Println("failed to marshal payload")
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(payloadBytes))
+	req, err := http.NewRequestWithContext(ctx, "POST", reqURL, bytes.NewBuffer(payloadBytes))
 	if err != nil {
 		fmt.Println("failed to create request")
 		return err
@@ -149,6 +154,7 @@ func (s *StockGatewayHttp) Complete(ctx context.Context, reservationId int32) er
 	if id := requestid.FromContext(ctx); id != "" {
 		req.Header.Set("X-Request-ID", id)
 	}
+	tracing.Inject(ctx, req.Header)
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		fmt.Println("failed to do request")

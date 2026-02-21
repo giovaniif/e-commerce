@@ -7,6 +7,11 @@ import (
 	"github.com/giovaniif/e-commerce/stock/domain/item"
 )
 
+var (
+	ErrItemNotFound     = errors.New("item not found")
+	ErrInsufficientStock = errors.New("insufficient stock")
+)
+
 type ItemRepository struct {
 	items map[int32]*item.Item
 	reservations map[int32]*item.Reservation
@@ -19,7 +24,7 @@ func NewItemRepository(items map[int32]*item.Item, reservations map[int32]*item.
 func (r *ItemRepository) GetItem(itemId int32) (*item.Item, error) {
 	repositoryItem, ok := r.items[itemId]
 	if !ok {
-		return nil, errors.New("item not found")
+		return nil, ErrItemNotFound
 	}
 	var itemReservations []item.Reservation
 	for _, reservation := range r.reservations {
@@ -33,7 +38,7 @@ func (r *ItemRepository) GetItem(itemId int32) (*item.Item, error) {
 
 func (r *ItemRepository) Reserve(reservationItem *item.Item, quantity int32) (*item.Reservation, error) {
 	if reservationItem.GetAvailableStock() < quantity {
-		return nil, errors.New("insufficient stock")
+		return nil, ErrInsufficientStock
 	}
 
 	newId := int32(len(r.reservations) + 1)

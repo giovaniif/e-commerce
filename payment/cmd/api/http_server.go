@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -12,8 +13,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/giovaniif/e-commerce/payment/infra/gateways"
+	"github.com/giovaniif/e-commerce/payment/infra/loki"
+	"github.com/giovaniif/e-commerce/payment/infra/metrics"
 	"github.com/giovaniif/e-commerce/payment/infra/requestid"
+	"github.com/giovaniif/e-commerce/payment/infra/tracing"
 	charge "github.com/giovaniif/e-commerce/payment/use_cases"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 type ChargeRequest struct {
@@ -21,7 +26,21 @@ type ChargeRequest struct {
 }
 
 func StartServer() {
-	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	logOut := io.Writer(os.Stdout)
+	var lokiWriter *loki.Writer
+	if lokiURL := os.Getenv("LOKI_URL"); lokiURL != "" {
+		if lw := loki.NewWriter(lokiURL, "payment"); lw != nil {
+			lokiWriter = lw
+			logOut = io.MultiWriter(os.Stdout, lw)
+		}
+	}
+	slog.SetDefault(slog.New(slog.NewJSONHandler(logOut, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	slog.Info("payment service started", "port", 3132)
+
+	shutdownTracing := tracing.Init("payment")
+	if shutdownTracing != nil {
+		defer shutdownTracing()
+	}
 
 	r := gin.Default()
 	chargeGateway := gateways.NewChargeGatewayMemory()
@@ -39,7 +58,10 @@ func StartServer() {
 			slog.Error("request", "request_id", id, "method", c.Request.Method, "path", c.Request.URL.Path, "status", c.Writer.Status())
 		}
 	})
+	r.Use(tracing.Middleware("payment"))
+	r.Use(metrics.Middleware)
 
+	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "healthy"})
 	})
@@ -79,6 +101,12 @@ func StartServer() {
 	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
 	<-quit
 	fmt.Println("Payment shutting down...")
+	if shutdownTracing != nil {
+		shutdownTracing()
+	}
+	if lokiWriter != nil {
+		_ = lokiWriter.Close()
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {

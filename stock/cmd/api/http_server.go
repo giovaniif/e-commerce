@@ -2,7 +2,9 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -11,9 +13,13 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/giovaniif/e-commerce/stock/domain/item"
+	"github.com/giovaniif/e-commerce/stock/infra/loki"
+	"github.com/giovaniif/e-commerce/stock/infra/metrics"
 	"github.com/giovaniif/e-commerce/stock/infra/repositories"
 	"github.com/giovaniif/e-commerce/stock/infra/requestid"
+	"github.com/giovaniif/e-commerce/stock/infra/tracing"
 	"github.com/giovaniif/e-commerce/stock/use_cases/complete"
 	"github.com/giovaniif/e-commerce/stock/use_cases/release"
 	"github.com/giovaniif/e-commerce/stock/use_cases/reserve"
@@ -42,7 +48,21 @@ func StartServer() {
 	releaseUseCase := release.NewRelease(itemRepository)
 	completeUseCase := complete.NewComplete(itemRepository)
 
-	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	logOut := io.Writer(os.Stdout)
+	var lokiWriter *loki.Writer
+	if lokiURL := os.Getenv("LOKI_URL"); lokiURL != "" {
+		if lw := loki.NewWriter(lokiURL, "stock"); lw != nil {
+			lokiWriter = lw
+			logOut = io.MultiWriter(os.Stdout, lw)
+		}
+	}
+	slog.SetDefault(slog.New(slog.NewJSONHandler(logOut, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	slog.Info("stock service started", "port", 3133)
+
+	shutdownTracing := tracing.Init("stock")
+	if shutdownTracing != nil {
+		defer shutdownTracing()
+	}
 
 	r := gin.Default()
 	r.Use(func(c *gin.Context) {
@@ -57,7 +77,10 @@ func StartServer() {
 			slog.Error("request", "request_id", id, "method", c.Request.Method, "path", c.Request.URL.Path, "status", c.Writer.Status())
 		}
 	})
+	r.Use(tracing.Middleware("stock"))
+	r.Use(metrics.Middleware)
 
+	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "healthy"})
 	})
@@ -70,10 +93,17 @@ func StartServer() {
 		}
 		reservation, err := reserveUseCase.Reserve(reserveRequest.ItemId, reserveRequest.Quantity)
 		if err != nil {
-			c.String(http.StatusInternalServerError, err.Error())
-		} else {
-			c.JSON(http.StatusOK, gin.H{"reservationId": reservation.ReservationId, "totalFee": reservation.TotalFee})
+			switch {
+			case errors.Is(err, repositories.ErrItemNotFound):
+				c.String(http.StatusNotFound, err.Error())
+			case errors.Is(err, repositories.ErrInsufficientStock):
+				c.String(http.StatusConflict, err.Error())
+			default:
+				c.String(http.StatusInternalServerError, err.Error())
+			}
+			return
 		}
+		c.JSON(http.StatusOK, gin.H{"reservationId": reservation.ReservationId, "totalFee": reservation.TotalFee})
 	})
 
 	r.POST("/release", func(c *gin.Context) {
@@ -119,6 +149,12 @@ func StartServer() {
 	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
 	<-quit
 	fmt.Println("Stock shutting down...")
+	if shutdownTracing != nil {
+		shutdownTracing()
+	}
+	if lokiWriter != nil {
+		_ = lokiWriter.Close()
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {
