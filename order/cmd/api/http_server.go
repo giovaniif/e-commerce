@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -59,7 +60,11 @@ func StartServer() {
 			IdempotencyKey: idempotencyKey,
 		})
 		if err != nil {
-			c.String(http.StatusInternalServerError, err.Error())
+			if errors.Is(err, context.DeadlineExceeded) {
+				c.String(http.StatusGatewayTimeout, err.Error())
+			} else {
+				c.String(http.StatusInternalServerError, err.Error())
+			}
 		} else {
 			c.String(http.StatusOK, "Checkout successful")
 		}
