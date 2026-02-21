@@ -1,6 +1,7 @@
 package gateways
 
 import (
+	"context"
 	"errors"
 	"sync"
 
@@ -23,7 +24,11 @@ func NewCheckoutGatewayMemory() *CheckoutGatewayMemory {
 	}
 }
 
-func (c *CheckoutGatewayMemory) ReserveIdempotencyKey(idempotencyKey string) (*protocols.CheckoutIdempotencyKeyResult, error) {
+func (c *CheckoutGatewayMemory) ReserveIdempotencyKey(ctx context.Context, idempotencyKey string) (*protocols.CheckoutIdempotencyKeyResult, error) {
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 	state, exists := c.idempotencyKeys[idempotencyKey]
@@ -45,14 +50,22 @@ func (c *CheckoutGatewayMemory) ReserveIdempotencyKey(idempotencyKey string) (*p
 	return nil, nil
 }
 
-func (c *CheckoutGatewayMemory) MarkFailure(idempotencyKey string) error {
+func (c *CheckoutGatewayMemory) MarkFailure(ctx context.Context, idempotencyKey string) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 	delete(c.idempotencyKeys, idempotencyKey)
 	return nil
 }
 
-func (c *CheckoutGatewayMemory) MarkSuccess(idempotencyKey string) error {
+func (c *CheckoutGatewayMemory) MarkSuccess(ctx context.Context, idempotencyKey string) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
