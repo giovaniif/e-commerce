@@ -35,6 +35,9 @@ Serviços disponíveis:
 - Order: http://localhost/order (via Nginx :80)
 - Payment: http://localhost/payment
 - Stock: http://localhost/stock
+- Redis: porta 6379 (idempotência do checkout)
+
+O **Order** usa **Redis** para persistir idempotência do checkout quando `REDIS_ADDR` está definido (no Docker já vem `REDIS_ADDR=redis:6379`). TTL das chaves: **24 horas**. Sem Redis (ex.: local sem `REDIS_ADDR`), a idempotência fica em memória.
 
 Garanta que os gateways do Order usem as URLs com hostname `stock` e `payment` (veja tabela acima).
 
@@ -56,6 +59,8 @@ cd order && go run main.go
 ```
 
 Para o Order conseguir falar com Stock e Payment, os gateways devem usar `http://localhost:3133` (Stock) e `http://localhost:3132` (Payment). Veja a tabela acima.
+
+**Redis (opcional):** para usar idempotência persistente localmente, suba um Redis (ex.: `docker run -p 6379:6379 redis:alpine`) e defina `REDIS_ADDR=localhost:6379` ao rodar o Order. Sem isso, a idempotência do checkout fica em memória.
 
 **Nginx (opcional):** para acessar via porta 80 como no Docker:
 
