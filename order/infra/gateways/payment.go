@@ -23,7 +23,7 @@ type ChargeRequest struct {
 	Amount float64 `json:"amount"`
 }
 
-func (p *PaymentGatewayHttp) Charge(ctx context.Context, amount float64) error {
+func (p *PaymentGatewayHttp) Charge(ctx context.Context, amount float64, idempotencyKey string) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
@@ -45,6 +45,7 @@ func (p *PaymentGatewayHttp) Charge(ctx context.Context, amount float64) error {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", idempotencyKey)
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
 		fmt.Println("failed to do request")

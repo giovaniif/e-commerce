@@ -39,7 +39,7 @@ type mockPaymentGateway struct {
 	chargeErr error
 }
 
-func (m *mockPaymentGateway) Charge(ctx context.Context, amount float64) error {
+func (m *mockPaymentGateway) Charge(ctx context.Context, amount float64, idempotencyKey string) error {
 	m.charged = append(m.charged, amount)
 	return m.chargeErr
 }

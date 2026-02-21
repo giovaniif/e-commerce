@@ -56,7 +56,7 @@ func (c *Checkout) Checkout(ctx context.Context, input Input) error {
 		return err
 	}
 
-	err = c.paymentGateway.Charge(ctx, reservation.TotalFee)
+	err = c.paymentGateway.Charge(ctx, reservation.TotalFee, input.IdempotencyKey)
 	if err != nil {
 		c.stockGateway.Release(ctx, reservation.Id)
 		return err
