@@ -9,6 +9,7 @@ import (
 	"net/http"
 
 	infra "github.com/giovaniif/e-commerce/order/infra"
+	"github.com/giovaniif/e-commerce/order/infra/requestid"
 	protocols "github.com/giovaniif/e-commerce/order/protocols"
 )
 
@@ -60,6 +61,9 @@ func (s *StockGatewayHttp) Reserve(ctx context.Context, itemId int32, quantity i
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if id := requestid.FromContext(ctx); id != "" {
+		req.Header.Set("X-Request-ID", id)
+	}
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		return nil, err
@@ -106,6 +110,9 @@ func (s *StockGatewayHttp) Release(ctx context.Context, reservationId int32) err
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if id := requestid.FromContext(ctx); id != "" {
+		req.Header.Set("X-Request-ID", id)
+	}
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		fmt.Println("failed to do request")
@@ -139,6 +146,9 @@ func (s *StockGatewayHttp) Complete(ctx context.Context, reservationId int32) er
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if id := requestid.FromContext(ctx); id != "" {
+		req.Header.Set("X-Request-ID", id)
+	}
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		fmt.Println("failed to do request")

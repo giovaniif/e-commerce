@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -14,6 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 	"github.com/giovaniif/e-commerce/order/infra/gateways"
+	"github.com/giovaniif/e-commerce/order/infra/requestid"
 	"github.com/giovaniif/e-commerce/order/protocols"
 	checkout "github.com/giovaniif/e-commerce/order/use_cases"
 )
@@ -48,7 +50,21 @@ func StartServer() {
 	sleeperGateway := gateways.NewSleeper()
 	checkoutUseCase := checkout.NewCheckout(stockGateway, paymentGateway, checkoutGateway, sleeperGateway)
 
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
+
 	r := gin.Default()
+	r.Use(func(c *gin.Context) {
+		id := c.GetHeader("X-Request-ID")
+		if id == "" {
+			id = requestid.Generate()
+		}
+		c.Request = c.Request.WithContext(requestid.NewContext(c.Request.Context(), id))
+		c.Header("X-Request-ID", id)
+		c.Next()
+		if c.Writer.Status() >= 400 {
+			slog.Error("request", "request_id", id, "method", c.Request.Method, "path", c.Request.URL.Path, "status", c.Writer.Status())
+		}
+	})
 
 	r.GET("/health", func(c *gin.Context) {
 		status := "healthy"
