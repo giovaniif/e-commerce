@@ -34,47 +34,49 @@ func (c *CheckoutGatewayRedis) key(idempotencyKey string) string {
 }
 
 func (c *CheckoutGatewayRedis) ReserveIdempotencyKey(ctx context.Context, idempotencyKey string) (*protocols.CheckoutIdempotencyKeyResult, error) {
-	if ctx.Err() != nil {
-		return nil, ctx.Err()
-	}
-
 	k := c.key(idempotencyKey)
 
-	data, err := c.client.Get(ctx, k).Bytes()
-	if err == redis.Nil {
-		state := checkoutRedisState{Status: "processing"}
-		raw, _ := json.Marshal(state)
-		_, err := c.client.SetArgs(ctx, k, raw, redis.SetArgs{Mode: "NX", TTL: idempotencyTTL}).Result()
+	for {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+
+		data, err := c.client.Get(ctx, k).Bytes()
 		if err == redis.Nil {
-			return c.ReserveIdempotencyKey(ctx, idempotencyKey)
+			state := checkoutRedisState{Status: "processing"}
+			raw, _ := json.Marshal(state)
+			_, err := c.client.SetArgs(ctx, k, raw, redis.SetArgs{Mode: "NX", TTL: idempotencyTTL}).Result()
+			if err == redis.Nil {
+				continue
+			}
+			if err != nil {
+				return nil, fmt.Errorf("redis set: %w", err)
+			}
+			return nil, nil
 		}
 		if err != nil {
-			return nil, fmt.Errorf("redis set: %w", err)
+			return nil, fmt.Errorf("redis get: %w", err)
 		}
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("redis get: %w", err)
-	}
 
-	var state checkoutRedisState
-	if err := json.Unmarshal(data, &state); err != nil {
-		return nil, fmt.Errorf("redis unmarshal: %w", err)
-	}
-
-	switch state.Status {
-	case "success":
-		return state.Result, nil
-	case "processing":
-		return nil, errors.New("idempotency key is already being processed")
-	default:
-		_ = c.client.Del(ctx, k).Err()
-		state := checkoutRedisState{Status: "processing"}
-		raw, _ := json.Marshal(state)
-		if err := c.client.Set(ctx, k, raw, idempotencyTTL).Err(); err != nil {
-			return nil, fmt.Errorf("redis set: %w", err)
+		var state checkoutRedisState
+		if err := json.Unmarshal(data, &state); err != nil {
+			return nil, fmt.Errorf("redis unmarshal: %w", err)
 		}
-		return nil, nil
+
+		switch state.Status {
+		case "success":
+			return state.Result, nil
+		case "processing":
+			return nil, errors.New("idempotency key is already being processed")
+		default:
+			_ = c.client.Del(ctx, k).Err()
+			newState := checkoutRedisState{Status: "processing"}
+			raw, _ := json.Marshal(newState)
+			if err := c.client.Set(ctx, k, raw, idempotencyTTL).Err(); err != nil {
+				return nil, fmt.Errorf("redis set: %w", err)
+			}
+			return nil, nil
+		}
 	}
 }
 
