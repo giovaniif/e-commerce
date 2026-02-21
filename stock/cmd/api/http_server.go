@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -12,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/giovaniif/e-commerce/stock/domain/item"
 	"github.com/giovaniif/e-commerce/stock/infra/repositories"
+	"github.com/giovaniif/e-commerce/stock/infra/requestid"
 	"github.com/giovaniif/e-commerce/stock/use_cases/complete"
 	"github.com/giovaniif/e-commerce/stock/use_cases/release"
 	"github.com/giovaniif/e-commerce/stock/use_cases/reserve"
@@ -39,7 +41,22 @@ func StartServer() {
 	reserveUseCase := reserve.NewReserve(itemRepository)
 	releaseUseCase := release.NewRelease(itemRepository)
 	completeUseCase := complete.NewComplete(itemRepository)
+
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
+
 	r := gin.Default()
+	r.Use(func(c *gin.Context) {
+		id := c.GetHeader("X-Request-ID")
+		if id == "" {
+			id = requestid.Generate()
+		}
+		c.Request = c.Request.WithContext(requestid.NewContext(c.Request.Context(), id))
+		c.Header("X-Request-ID", id)
+		c.Next()
+		if c.Writer.Status() >= 400 {
+			slog.Error("request", "request_id", id, "method", c.Request.Method, "path", c.Request.URL.Path, "status", c.Writer.Status())
+		}
+	})
 
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "healthy"})

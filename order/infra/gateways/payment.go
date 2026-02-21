@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+
+	"github.com/giovaniif/e-commerce/order/infra/requestid"
 )
 
 type PaymentGatewayHttp struct {
@@ -46,6 +48,9 @@ func (p *PaymentGatewayHttp) Charge(ctx context.Context, amount float64, idempot
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Idempotency-Key", idempotencyKey)
+	if id := requestid.FromContext(ctx); id != "" {
+		req.Header.Set("X-Request-ID", id)
+	}
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
 		fmt.Println("failed to do request")

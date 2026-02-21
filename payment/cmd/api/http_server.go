@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/giovaniif/e-commerce/payment/infra/gateways"
+	"github.com/giovaniif/e-commerce/payment/infra/requestid"
 	charge "github.com/giovaniif/e-commerce/payment/use_cases"
 )
 
@@ -19,9 +21,24 @@ type ChargeRequest struct {
 }
 
 func StartServer() {
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
+
 	r := gin.Default()
 	chargeGateway := gateways.NewChargeGatewayMemory()
 	idempotencyGateway := gateways.NewIdempotencyGatewayMemory()
+
+	r.Use(func(c *gin.Context) {
+		id := c.GetHeader("X-Request-ID")
+		if id == "" {
+			id = requestid.Generate()
+		}
+		c.Request = c.Request.WithContext(requestid.NewContext(c.Request.Context(), id))
+		c.Header("X-Request-ID", id)
+		c.Next()
+		if c.Writer.Status() >= 400 {
+			slog.Error("request", "request_id", id, "method", c.Request.Method, "path", c.Request.URL.Path, "status", c.Writer.Status())
+		}
+	})
 
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "healthy"})
