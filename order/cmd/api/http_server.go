@@ -48,6 +48,22 @@ func StartServer() {
 
 	r := gin.Default()
 
+	r.GET("/health", func(c *gin.Context) {
+		status := "healthy"
+		redisCheck := "n/a"
+		if redisAddr := os.Getenv("REDIS_ADDR"); redisAddr != "" {
+			rdb := redis.NewClient(&redis.Options{Addr: redisAddr})
+			if err := rdb.Ping(c.Request.Context()).Err(); err != nil {
+				status = "degraded"
+				redisCheck = "down"
+			} else {
+				redisCheck = "up"
+			}
+			_ = rdb.Close()
+		}
+		c.JSON(http.StatusOK, gin.H{"status": status, "checks": gin.H{"redis": redisCheck}})
+	})
+
 	checkoutTimeoutSec := defaultCheckoutTimeoutSec
 	if s := os.Getenv("CHECKOUT_TIMEOUT_SECONDS"); s != "" {
 		if n, err := strconv.Atoi(s); err == nil && n > 0 {

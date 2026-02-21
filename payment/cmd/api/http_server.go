@@ -18,6 +18,10 @@ func StartServer() {
 	chargeGateway := gateways.NewChargeGatewayMemory()
 	idempotencyGateway := gateways.NewIdempotencyGatewayMemory()
 
+	r.GET("/health", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "healthy"})
+	})
+
 	r.POST("/charge", func(c *gin.Context) {
 		chargeUseCase := charge.NewCharge(chargeGateway, idempotencyGateway)
 		idempotencyKey := c.GetHeader("Idempotency-Key")

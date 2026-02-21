@@ -36,6 +36,10 @@ func StartServer() {
 	completeUseCase := complete.NewComplete(itemRepository)
 	r := gin.Default()
 
+	r.GET("/health", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "healthy"})
+	})
+
 	r.POST("/reserve", func(c *gin.Context) {
 		var reserveRequest ReserveRequest
 		if err := c.ShouldBindJSON(&reserveRequest); err != nil {
