@@ -1,0 +1,23 @@
+---
+description: Convenções ao criar issues no GitHub com gh cli
+alwaysApply: false
+---
+
+# Criar issues no GitHub
+
+Quando o usuário pedir para criar uma issue no repositório usando o GitHub CLI (`gh issue create`):
+
+1. **Assignee**: Sempre definir o usuário **giovaniif** como assignee:
+   ```bash
+   gh issue create --assignee giovaniif ...
+   ```
+
+2. **Arquivo temporário para o body**: Se for necessário criar um arquivo (ex.: `.issue-*.md`) para o corpo da issue:
+   - Usar `--body-file` no `gh issue create`
+   - **Após** a issue ser criada com sucesso, **deletar** o arquivo temporário
+
+Exemplo de fluxo:
+```bash
+gh issue create --title "..." --body-file .issue-topic.md --assignee giovaniif
+# Em seguida: deletar .issue-topic.md
+```

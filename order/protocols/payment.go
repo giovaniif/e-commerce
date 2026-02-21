@@ -1,5 +1,7 @@
 package protocols
 
+import "context"
+
 type PaymentGateway interface {
-	Charge(amount float64) error
+	Charge(context context.Context, amount float64) error
 }

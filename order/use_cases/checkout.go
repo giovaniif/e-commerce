@@ -1,6 +1,7 @@
 package checkout
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"time"
@@ -22,8 +23,12 @@ func NewCheckout(stockGateway protocols.StockGateway, paymentGateway protocols.P
 	}
 }
 
-func (c *Checkout) Checkout(input Input) error {
-	result, err := c.checkoutGateway.ReserveIdempotencyKey(input.IdempotencyKey)
+func (c *Checkout) Checkout(ctx context.Context, input Input) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
+	result, err := c.checkoutGateway.ReserveIdempotencyKey(ctx, input.IdempotencyKey)
 	if err != nil {
 		return err
 	}
@@ -35,37 +40,37 @@ func (c *Checkout) Checkout(input Input) error {
 	success := false
 	defer func() {
 		if success {
-			c.checkoutGateway.MarkSuccess(input.IdempotencyKey)
+			c.checkoutGateway.MarkSuccess(ctx, input.IdempotencyKey)
 		} else {
-			c.checkoutGateway.MarkFailure(input.IdempotencyKey)
+			c.checkoutGateway.MarkFailure(ctx, input.IdempotencyKey)
 		}
 	}()
 
 	reservationOperation := func() (*protocols.Reservation, error) {
-		reservation, reservationError := c.stockGateway.Reserve(input.ItemId, input.Quantity)
+		reservation, reservationError := c.stockGateway.Reserve(ctx, input.ItemId, input.Quantity)
 		return reservation, reservationError
 	}
-	wrappedOperation := RetryWithBackoff(reservationOperation, c.sleeper)
+	wrappedOperation := RetryWithBackoff(ctx, reservationOperation, c.sleeper)
 	reservation, err := wrappedOperation()
 	if err != nil {
 		return err
 	}
 
-	err = c.paymentGateway.Charge(reservation.TotalFee)
+	err = c.paymentGateway.Charge(ctx, reservation.TotalFee)
 	if err != nil {
-		c.stockGateway.Release(reservation.Id)
+		c.stockGateway.Release(ctx, reservation.Id)
 		return err
 	}
 
-	completeStockOperation := RetryWithBackoff(func() (*protocols.Reservation, error) {
-		completeStockError := c.stockGateway.Complete(reservation.Id)
+	completeStockOperation := RetryWithBackoff(ctx, func() (*protocols.Reservation, error) {
+		completeStockError := c.stockGateway.Complete(ctx, reservation.Id)
 
 		return nil, completeStockError
 	}, c.sleeper)
 	_, err = completeStockOperation()
 	if err != nil {
-		releaseStockOperation := RetryWithBackoff(func() (*protocols.Reservation, error) {
-			releaseStockError := c.stockGateway.Release(reservation.Id)
+		releaseStockOperation := RetryWithBackoff(ctx, func() (*protocols.Reservation, error) {
+			releaseStockError := c.stockGateway.Release(ctx, reservation.Id)
 			return nil, releaseStockError
 		}, c.sleeper)
 		_, releaseStockError := releaseStockOperation()
@@ -82,22 +87,28 @@ func (c *Checkout) Checkout(input Input) error {
 
 type RetryFunc func() (*protocols.Reservation, error)
 
-func RetryWithBackoff(operation RetryFunc, sleeper protocols.Sleeper) RetryFunc {
+func RetryWithBackoff(ctx context.Context, operation RetryFunc, sleeper protocols.Sleeper) RetryFunc {
 	return func() (*protocols.Reservation, error) {
 		var lastError error
 
 		for i := 0; i < MAX_RETRIES; i++ {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
 			val, err := operation()
 
 			if err == nil {
 				return val, err
 			}
+			lastError = err
 
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
 			secRetry := math.Pow(2, float64(i))
 			fmt.Printf("Retrying operation in %f seconds\n", secRetry)
 			delay := time.Duration(secRetry) * BASE_DELAY
 			sleeper.Sleep(delay)
-			lastError = err
 		}
 
 		return nil, lastError

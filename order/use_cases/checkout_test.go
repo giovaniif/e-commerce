@@ -1,6 +1,7 @@
 package checkout
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -18,17 +19,17 @@ type mockStockGateway struct {
 	completeErr    error
 }
 
-func (m *mockStockGateway) Reserve(itemId int32, quantity int32) (*protocols.Reservation, error) {
+func (m *mockStockGateway) Reserve(ctx context.Context, itemId int32, quantity int32) (*protocols.Reservation, error) {
 	m.reservedInputs = append(m.reservedInputs, struct{ itemId, quantity int32 }{itemId, quantity})
 	return m.reserveResult, m.reserveErr
 }
 
-func (m *mockStockGateway) Release(reservationId int32) error {
+func (m *mockStockGateway) Release(ctx context.Context, reservationId int32) error {
 	m.releasedIds = append(m.releasedIds, reservationId)
 	return m.releaseErr
 }
 
-func (m *mockStockGateway) Complete(reservationId int32) error {
+func (m *mockStockGateway) Complete(ctx context.Context, reservationId int32) error {
 	m.completedIds = append(m.completedIds, reservationId)
 	return m.completeErr
 }
@@ -38,7 +39,7 @@ type mockPaymentGateway struct {
 	chargeErr error
 }
 
-func (m *mockPaymentGateway) Charge(amount float64) error {
+func (m *mockPaymentGateway) Charge(ctx context.Context, amount float64) error {
 	m.charged = append(m.charged, amount)
 	return m.chargeErr
 }
@@ -52,17 +53,17 @@ type mockCheckoutGateway struct {
 	markFailureKey              string
 }
 
-func (m *mockCheckoutGateway) ReserveIdempotencyKey(idempotencyKey string) (*protocols.CheckoutIdempotencyKeyResult, error) {
+func (m *mockCheckoutGateway) ReserveIdempotencyKey(ctx context.Context, idempotencyKey string) (*protocols.CheckoutIdempotencyKeyResult, error) {
 	return m.reserveIdempotencyKeyResult, m.reserveIdempotencyKeyErr
 }
 
-func (m *mockCheckoutGateway) MarkSuccess(idempotencyKey string) error {
+func (m *mockCheckoutGateway) MarkSuccess(ctx context.Context, idempotencyKey string) error {
 	m.markSuccessCalled = true
 	m.markSuccessKey = idempotencyKey
 	return nil
 }
 
-func (m *mockCheckoutGateway) MarkFailure(idempotencyKey string) error {
+func (m *mockCheckoutGateway) MarkFailure(ctx context.Context, idempotencyKey string) error {
 	m.markFailureCalled = true
 	m.markFailureKey = idempotencyKey
 	return nil
@@ -81,7 +82,7 @@ func TestCheckoutReserveError(t *testing.T) {
 	sleeper := &MockSleeper{}
 	uc := NewCheckout(stock, payment, checkoutGateway, sleeper)
 
-	err := uc.Checkout(Input{ItemId: 1, Quantity: 2, IdempotencyKey: "123"})
+	err := uc.Checkout(context.Background(), Input{ItemId: 1, Quantity: 2, IdempotencyKey: "123"})
 	if err == nil {
 		t.Fatalf("expected error, got nil")
 	}
@@ -103,7 +104,7 @@ func TestCheckoutChargeWithTotalFee(t *testing.T) {
 	sleeper := &MockSleeper{}
 	uc := NewCheckout(stock, payment, checkoutGateway, sleeper)
 
-	_ = uc.Checkout(Input{ItemId: 1, Quantity: 2, IdempotencyKey: "123"})
+	_ = uc.Checkout(context.Background(), Input{ItemId: 1, Quantity: 2, IdempotencyKey: "123"})
 	if len(payment.charged) != 1 {
 		t.Fatalf("expected Charge to be called once, got %d", len(payment.charged))
 	}
@@ -119,7 +120,7 @@ func TestCheckoutReleaseOnChargeFail(t *testing.T) {
 	sleeper := &MockSleeper{}
 	uc := NewCheckout(stock, payment, checkoutGateway, sleeper)
 
-	err := uc.Checkout(Input{ItemId: 1, Quantity: 2, IdempotencyKey: "123"})
+	err := uc.Checkout(context.Background(), Input{ItemId: 1, Quantity: 2, IdempotencyKey: "123"})
 	if err == nil {
 		t.Fatalf("expected error, got nil")
 	}
@@ -135,7 +136,7 @@ func TestCheckoutCompleteCalled(t *testing.T) {
 	sleeper := &MockSleeper{}
 	uc := NewCheckout(stock, payment, checkoutGateway, sleeper)
 
-	_ = uc.Checkout(Input{ItemId: 1, Quantity: 1, IdempotencyKey: "123"})
+	_ = uc.Checkout(context.Background(), Input{ItemId: 1, Quantity: 1, IdempotencyKey: "123"})
 	if len(stock.completedIds) != 1 || stock.completedIds[0] != 3 {
 		t.Fatalf("expected Complete called with res-3, got %v", stock.completedIds)
 	}
@@ -148,7 +149,7 @@ func TestCheckoutReleaseOnCompleteFail(t *testing.T) {
 	sleeper := &MockSleeper{}
 	uc := NewCheckout(stock, payment, checkoutGateway, sleeper)
 
-	err := uc.Checkout(Input{ItemId: 1, Quantity: 1, IdempotencyKey: "123"})
+	err := uc.Checkout(context.Background(), Input{ItemId: 1, Quantity: 1, IdempotencyKey: "123"})
 	if err == nil {
 		t.Fatalf("expected error, got nil")
 	}
@@ -164,7 +165,7 @@ func TestCheckoutSuccess(t *testing.T) {
 	sleeper := &MockSleeper{}
 	uc := NewCheckout(stock, payment, checkoutGateway, sleeper)
 
-	err := uc.Checkout(Input{ItemId: 1, Quantity: 2, IdempotencyKey: "123"})
+	err := uc.Checkout(context.Background(), Input{ItemId: 1, Quantity: 2, IdempotencyKey: "123"})
 	if err != nil {
 		t.Fatalf("expected nil, got %v", err)
 	}
@@ -191,7 +192,7 @@ func TestCheckoutWithExistingIdempotencyKey(t *testing.T) {
 	sleeper := &MockSleeper{}
 	uc := NewCheckout(stock, payment, checkoutGateway, sleeper)
 
-	err := uc.Checkout(Input{ItemId: 1, Quantity: 2, IdempotencyKey: "123"})
+	err := uc.Checkout(context.Background(), Input{ItemId: 1, Quantity: 2, IdempotencyKey: "123"})
 	if err == nil {
 		t.Fatalf("expected error, got nil")
 	}
@@ -212,7 +213,7 @@ func TestCheckoutWithSuccessfulIdempotencyKey(t *testing.T) {
 	sleeper := &MockSleeper{}
 	uc := NewCheckout(stock, payment, checkoutGateway, sleeper)
 
-	err := uc.Checkout(Input{ItemId: 1, Quantity: 2, IdempotencyKey: "abc-123"})
+	err := uc.Checkout(context.Background(), Input{ItemId: 1, Quantity: 2, IdempotencyKey: "abc-123"})
 	if err != nil {
 		t.Fatalf("expected nil error when idempotency key already succeeded, got %v", err)
 	}
@@ -242,7 +243,7 @@ func TestCheckoutWithProcessingIdempotencyKey(t *testing.T) {
 	sleeper := &MockSleeper{}
 	uc := NewCheckout(stock, payment, checkoutGateway, sleeper)
 
-	err := uc.Checkout(Input{ItemId: 1, Quantity: 2, IdempotencyKey: "xyz-456"})
+	err := uc.Checkout(context.Background(), Input{ItemId: 1, Quantity: 2, IdempotencyKey: "xyz-456"})
 	if err == nil {
 		t.Fatalf("expected error when idempotency key is processing, got nil")
 	}
@@ -264,7 +265,7 @@ func TestCheckoutMarkFailureOnReserveError(t *testing.T) {
 	sleeper := &MockSleeper{}
 	uc := NewCheckout(stock, payment, checkoutGateway, sleeper)
 
-	err := uc.Checkout(Input{ItemId: 1, Quantity: 2, IdempotencyKey: "fail-1"})
+	err := uc.Checkout(context.Background(), Input{ItemId: 1, Quantity: 2, IdempotencyKey: "fail-1"})
 	if err == nil {
 		t.Fatalf("expected error, got nil")
 	}
@@ -283,7 +284,7 @@ func TestCheckoutMarkFailureOnChargeError(t *testing.T) {
 	sleeper := &MockSleeper{}
 	uc := NewCheckout(stock, payment, checkoutGateway, sleeper)
 
-	err := uc.Checkout(Input{ItemId: 1, Quantity: 2, IdempotencyKey: "fail-2"})
+	err := uc.Checkout(context.Background(), Input{ItemId: 1, Quantity: 2, IdempotencyKey: "fail-2"})
 	if err == nil {
 		t.Fatalf("expected error, got nil")
 	}
@@ -305,7 +306,7 @@ func TestCheckoutMarkFailureOnCompleteError(t *testing.T) {
 	sleeper := &MockSleeper{}
 	uc := NewCheckout(stock, payment, checkoutGateway, sleeper)
 
-	err := uc.Checkout(Input{ItemId: 1, Quantity: 2, IdempotencyKey: "fail-3"})
+	err := uc.Checkout(context.Background(), Input{ItemId: 1, Quantity: 2, IdempotencyKey: "fail-3"})
 	if err == nil {
 		t.Fatalf("expected error, got nil")
 	}
@@ -324,7 +325,7 @@ func TestCheckoutMarkSuccessOnCompleteSuccess(t *testing.T) {
 	sleeper := &MockSleeper{}
 	uc := NewCheckout(stock, payment, checkoutGateway, sleeper)
 
-	err := uc.Checkout(Input{ItemId: 1, Quantity: 2, IdempotencyKey: "success-1"})
+	err := uc.Checkout(context.Background(), Input{ItemId: 1, Quantity: 2, IdempotencyKey: "success-1"})
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
@@ -336,5 +337,33 @@ func TestCheckoutMarkSuccessOnCompleteSuccess(t *testing.T) {
 	}
 	if checkoutGateway.markFailureCalled {
 		t.Fatalf("expected MarkFailure not to be called on successful checkout")
+	}
+}
+
+func TestCheckoutContextError(t *testing.T) {
+	stock := &mockStockGateway{}
+	payment := &mockPaymentGateway{}
+	checkoutGateway := &mockCheckoutGateway{}
+	sleeper := &MockSleeper{}
+	uc := NewCheckout(stock, payment, checkoutGateway, sleeper)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
+	defer cancel()
+
+	err := uc.Checkout(ctx, Input{ItemId: 1, Quantity: 2, IdempotencyKey: "context-error"})
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+
+	if err != context.DeadlineExceeded {
+		t.Fatalf("expected context.DeadlineExceeded, got %v", err)
+	}
+
+	if len(stock.reservedInputs) != 0 {
+		t.Fatalf("expected Reserve not to be called when context expired, got %d calls", len(stock.reservedInputs))
+	}
+
+	if checkoutGateway.markSuccessCalled || checkoutGateway.markFailureCalled {
+		t.Fatalf("expected neither MarkSuccess nor MarkFailure when context expired")
 	}
 }

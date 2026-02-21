@@ -2,6 +2,7 @@ package gateways
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -39,7 +40,11 @@ type ReservationResponse struct {
 	TotalFee      float64 `json:"totalFee"`
 }
 
-func (s *StockGatewayHttp) Reserve(itemId int32, quantity int32) (*protocols.Reservation, error) {
+func (s *StockGatewayHttp) Reserve(ctx context.Context, itemId int32, quantity int32) (*protocols.Reservation, error) {
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
 	// url := "http://stock:3133/reserve"
 	url := "http://localhost:3133/reserve"
 	payload := ReserveRequest{
@@ -50,7 +55,7 @@ func (s *StockGatewayHttp) Reserve(itemId int32, quantity int32) (*protocols.Res
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(payloadBytes))
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(payloadBytes))
 	if err != nil {
 		return nil, err
 	}
@@ -80,7 +85,11 @@ func (s *StockGatewayHttp) Reserve(itemId int32, quantity int32) (*protocols.Res
 	}, nil
 }
 
-func (s *StockGatewayHttp) Release(reservationId int32) error {
+func (s *StockGatewayHttp) Release(ctx context.Context, reservationId int32) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
 	// url := "http://stock:3133/release"
 	url := "http://localhost:3133/release"
 	payload := ReleaseRequest{
@@ -91,7 +100,7 @@ func (s *StockGatewayHttp) Release(reservationId int32) error {
 		fmt.Println("failed to marshal payload")
 		return err
 	}
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(payloadBytes))
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(payloadBytes))
 	if err != nil {
 		fmt.Println("failed to create request")
 		return err
@@ -109,7 +118,11 @@ func (s *StockGatewayHttp) Release(reservationId int32) error {
 	return nil
 }
 
-func (s *StockGatewayHttp) Complete(reservationId int32) error {
+func (s *StockGatewayHttp) Complete(ctx context.Context, reservationId int32) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
 	// url := "http://stock:3133/complete"
 	url := "http://localhost:3133/complete"
 	payload := CompleteRequest{
@@ -120,7 +133,7 @@ func (s *StockGatewayHttp) Complete(reservationId int32) error {
 		fmt.Println("failed to marshal payload")
 		return err
 	}
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(payloadBytes))
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(payloadBytes))
 	if err != nil {
 		fmt.Println("failed to create request")
 		return err
