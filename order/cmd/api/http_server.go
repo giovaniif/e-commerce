@@ -60,7 +60,7 @@ func StartServer() {
 			IdempotencyKey: idempotencyKey,
 		})
 		if err != nil {
-			if errors.Is(err, context.DeadlineExceeded) {
+			if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 				c.String(http.StatusGatewayTimeout, err.Error())
 			} else {
 				c.String(http.StatusInternalServerError, err.Error())
