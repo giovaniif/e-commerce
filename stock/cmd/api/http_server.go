@@ -1,8 +1,13 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/giovaniif/e-commerce/stock/domain/item"
@@ -85,6 +90,23 @@ func StartServer() {
 		}
 	})
 
-	r.Run(":3133")
+	srv := &http.Server{Addr: ":3133", Handler: r}
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			fmt.Printf("Stock server: %v\n", err)
+		}
+	}()
 	fmt.Println("Stock is running on port 3133")
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
+	<-quit
+	fmt.Println("Stock shutting down...")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		fmt.Printf("Stock shutdown: %v\n", err)
+	} else {
+		fmt.Println("Stock stopped")
+	}
 }

@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
+	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -103,6 +105,23 @@ func StartServer() {
 		}
 	})
 
-	r.Run(":3131")
+	srv := &http.Server{Addr: ":3131", Handler: r}
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			fmt.Printf("Order server: %v\n", err)
+		}
+	}()
 	fmt.Println("Order is running on port 3131")
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
+	<-quit
+	fmt.Println("Order shutting down...")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		fmt.Printf("Order shutdown: %v\n", err)
+	} else {
+		fmt.Println("Order stopped")
+	}
 }
