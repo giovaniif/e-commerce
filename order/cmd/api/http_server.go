@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
 	"github.com/giovaniif/e-commerce/order/infra/gateways"
+	"github.com/giovaniif/e-commerce/order/protocols"
 	checkout "github.com/giovaniif/e-commerce/order/use_cases"
 )
 
@@ -25,7 +27,22 @@ func StartServer() {
 	httpClient := &http.Client{}
 	stockGateway := gateways.NewStockGatewayHttp(httpClient)
 	paymentGateway := gateways.NewPaymentGatewayHttp(httpClient)
-	checkoutGateway := gateways.NewCheckoutGatewayMemory()
+
+	var checkoutGateway protocols.CheckoutGateway
+	if redisAddr := os.Getenv("REDIS_ADDR"); redisAddr != "" {
+		rdb := redis.NewClient(&redis.Options{Addr: redisAddr})
+		if err := rdb.Ping(context.Background()).Err(); err != nil {
+			fmt.Printf("Redis ping failed (%s), using in-memory idempotency: %v\n", redisAddr, err)
+			checkoutGateway = gateways.NewCheckoutGatewayMemory()
+		} else {
+			checkoutGateway = gateways.NewCheckoutGatewayRedis(rdb)
+			fmt.Println("Checkout idempotency: Redis (TTL 24h)")
+		}
+	} else {
+		checkoutGateway = gateways.NewCheckoutGatewayMemory()
+		fmt.Println("Checkout idempotency: in-memory (set REDIS_ADDR for Redis)")
+	}
+
 	sleeperGateway := gateways.NewSleeper()
 	checkoutUseCase := checkout.NewCheckout(stockGateway, paymentGateway, checkoutGateway, sleeperGateway)
 
