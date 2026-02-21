@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -13,9 +14,13 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
 	"github.com/giovaniif/e-commerce/order/infra/gateways"
+	"github.com/giovaniif/e-commerce/order/infra/loki"
+	"github.com/giovaniif/e-commerce/order/infra/metrics"
 	"github.com/giovaniif/e-commerce/order/infra/requestid"
+	"github.com/giovaniif/e-commerce/order/infra/tracing"
 	"github.com/giovaniif/e-commerce/order/protocols"
 	checkout "github.com/giovaniif/e-commerce/order/use_cases"
 )
@@ -28,9 +33,18 @@ type CheckoutRequest struct {
 }
 
 func StartServer() {
+	stockBaseURL := os.Getenv("STOCK_BASE_URL")
+	if stockBaseURL == "" {
+		stockBaseURL = "http://localhost:3133"
+	}
+	paymentBaseURL := os.Getenv("PAYMENT_BASE_URL")
+	if paymentBaseURL == "" {
+		paymentBaseURL = "http://localhost:3132"
+	}
+
 	httpClient := &http.Client{}
-	stockGateway := gateways.NewStockGatewayHttp(httpClient)
-	paymentGateway := gateways.NewPaymentGatewayHttp(httpClient)
+	stockGateway := gateways.NewStockGatewayHttp(httpClient, stockBaseURL)
+	paymentGateway := gateways.NewPaymentGatewayHttp(httpClient, paymentBaseURL)
 
 	var checkoutGateway protocols.CheckoutGateway
 	if redisAddr := os.Getenv("REDIS_ADDR"); redisAddr != "" {
@@ -50,7 +64,21 @@ func StartServer() {
 	sleeperGateway := gateways.NewSleeper()
 	checkoutUseCase := checkout.NewCheckout(stockGateway, paymentGateway, checkoutGateway, sleeperGateway)
 
-	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	logOut := io.Writer(os.Stdout)
+	var lokiWriter *loki.Writer
+	if lokiURL := os.Getenv("LOKI_URL"); lokiURL != "" {
+		if lw := loki.NewWriter(lokiURL, "order"); lw != nil {
+			lokiWriter = lw
+			logOut = io.MultiWriter(os.Stdout, lw)
+		}
+	}
+	slog.SetDefault(slog.New(slog.NewJSONHandler(logOut, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	slog.Info("order service started", "port", 3131)
+
+	shutdownTracing := tracing.Init("order")
+	if shutdownTracing != nil {
+		defer shutdownTracing()
+	}
 
 	r := gin.Default()
 	r.Use(func(c *gin.Context) {
@@ -65,7 +93,10 @@ func StartServer() {
 			slog.Error("request", "request_id", id, "method", c.Request.Method, "path", c.Request.URL.Path, "status", c.Writer.Status())
 		}
 	})
+	r.Use(tracing.Middleware("order"))
+	r.Use(metrics.Middleware)
 
+	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
 	r.GET("/health", func(c *gin.Context) {
 		status := "healthy"
 		redisCheck := "n/a"
@@ -133,6 +164,12 @@ func StartServer() {
 	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
 	<-quit
 	fmt.Println("Order shutting down...")
+	if shutdownTracing != nil {
+		shutdownTracing()
+	}
+	if lokiWriter != nil {
+		_ = lokiWriter.Close()
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {

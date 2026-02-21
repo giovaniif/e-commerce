@@ -6,6 +6,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/giovaniif/e-commerce/order/infra"
 	protocols "github.com/giovaniif/e-commerce/order/protocols"
 )
 
@@ -101,6 +102,10 @@ func RetryWithBackoff(ctx context.Context, operation RetryFunc, sleeper protocol
 				return val, err
 			}
 			lastError = err
+
+			if !infra.IsRetriable(err) {
+				return nil, err
+			}
 
 			if ctx.Err() != nil {
 				return nil, ctx.Err()

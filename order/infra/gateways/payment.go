@@ -7,17 +7,21 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 
 	"github.com/giovaniif/e-commerce/order/infra/requestid"
+	"github.com/giovaniif/e-commerce/order/infra/tracing"
 )
 
 type PaymentGatewayHttp struct {
 	httpClient *http.Client
+	baseURL    string
 }
 
-func NewPaymentGatewayHttp(httpClient *http.Client) *PaymentGatewayHttp {
+func NewPaymentGatewayHttp(httpClient *http.Client, baseURL string) *PaymentGatewayHttp {
 	return &PaymentGatewayHttp{
 		httpClient: httpClient,
+		baseURL:    baseURL,
 	}
 }
 
@@ -39,9 +43,8 @@ func (p *PaymentGatewayHttp) Charge(ctx context.Context, amount float64, idempot
 		return err
 	}
 
-	// url := "http://payment:3132/charge"
-	url := "http://localhost:3132/charge"
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(payloadBytes))
+	reqURL, _ := url.JoinPath(p.baseURL, "charge")
+	req, err := http.NewRequestWithContext(ctx, "POST", reqURL, bytes.NewBuffer(payloadBytes))
 	if err != nil {
 		fmt.Println("failed to create request")
 		return err
@@ -51,6 +54,7 @@ func (p *PaymentGatewayHttp) Charge(ctx context.Context, amount float64, idempot
 	if id := requestid.FromContext(ctx); id != "" {
 		req.Header.Set("X-Request-ID", id)
 	}
+	tracing.Inject(ctx, req.Header)
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
 		fmt.Println("failed to do request")
