@@ -3,6 +3,7 @@ package repositories
 import (
 	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/giovaniif/e-commerce/stock/domain/item"
 )
@@ -13,7 +14,8 @@ var (
 )
 
 type ItemRepository struct {
-	items map[int32]*item.Item
+	mu           sync.RWMutex
+	items        map[int32]*item.Item
 	reservations map[int32]*item.Reservation
 }
 
@@ -22,6 +24,8 @@ func NewItemRepository(items map[int32]*item.Item, reservations map[int32]*item.
 }
 
 func (r *ItemRepository) GetItem(itemId int32) (*item.Item, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	repositoryItem, ok := r.items[itemId]
 	if !ok {
 		return nil, ErrItemNotFound
@@ -37,6 +41,8 @@ func (r *ItemRepository) GetItem(itemId int32) (*item.Item, error) {
 }
 
 func (r *ItemRepository) Reserve(reservationItem *item.Item, quantity int32) (*item.Reservation, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if reservationItem.GetAvailableStock() < quantity {
 		return nil, ErrInsufficientStock
 	}
@@ -53,7 +59,9 @@ func (r *ItemRepository) Reserve(reservationItem *item.Item, quantity int32) (*i
 	return reservation, nil
 }
 
-func (r *ItemRepository) ReleaseReservation(reservationId int32) (error) {
+func (r *ItemRepository) ReleaseReservation(reservationId int32) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	reservation, ok := r.reservations[reservationId]
 	if !ok {
 		return errors.New("reservation not found")
@@ -65,10 +73,12 @@ func (r *ItemRepository) ReleaseReservation(reservationId int32) (error) {
 		ItemId: reservation.ItemId,
 		Status: "canceled",
 	}
-  return nil
+	return nil
 }
 
 func (r *ItemRepository) CompleteReservation(reservationId int32) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	reservation, ok := r.reservations[reservationId]
 	if !ok {
 		fmt.Printf("reservation %d not found", reservationId)
@@ -85,5 +95,7 @@ func (r *ItemRepository) CompleteReservation(reservationId int32) error {
 }
 
 func (r *ItemRepository) Save(it *item.Item) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.items[it.Id] = it
 }
