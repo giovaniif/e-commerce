@@ -5,6 +5,8 @@ services:
     ports:
       - "6379:6379"
     stop_grace_period: 5s
+    networks:
+      - app
 
   prometheus:
     image: prom/prometheus:v2.47.0
@@ -22,6 +24,8 @@ services:
       - order
       - payment
       - stock
+    networks:
+      - app
 
   loki:
     image: grafana/loki:2.9.2
@@ -30,6 +34,8 @@ services:
       - "3100:3100"
     stop_grace_period: 5s
     command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - app
 
   tempo:
     image: grafana/tempo:2.3.1
@@ -42,6 +48,8 @@ services:
     command: [ "-config.file=/etc/tempo/tempo.yml" ]
     volumes:
       - ./monitoring/tempo-config.yml:/etc/tempo/tempo.yml:ro
+    networks:
+      - app
 
   promtail:
     image: grafana/promtail:2.9.2
@@ -56,6 +64,8 @@ services:
     command: -config.file=/etc/promtail/config.yml
     depends_on:
       - loki
+    networks:
+      - app
 
   grafana:
     image: grafana/grafana:10.2.2
@@ -70,8 +80,10 @@ services:
       - GF_SERVER_HTTP_PORT=3000
       - GF_DATABASE_MAX_OPEN_CONN=1
       - GF_DATABASE_MAX_IDLE_CONN=1
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_AUTH_DISABLE_LOGIN_FORM=true
     volumes:
-      - grafana_data:/var/lib/grafana
       - ./monitoring/grafana/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
       - ./monitoring/grafana/provisioning/dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml:ro
       - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards/default:ro
@@ -79,6 +91,8 @@ services:
       - prometheus
       - loki
       - tempo
+    networks:
+      - app
 
   stock:
     build: ./stock
@@ -92,6 +106,8 @@ services:
     depends_on:
       - loki
       - tempo
+    networks:
+      - app
   payment:
     build: ./payment
     container_name: payment
@@ -104,6 +120,8 @@ services:
     depends_on:
       - loki
       - tempo
+    networks:
+      - app
   order:
     build: ./order
     container_name: order
@@ -122,6 +140,8 @@ services:
       - payment
       - loki
       - tempo
+    networks:
+      - app
   nginx:
     image: nginx:latest
     container_name: nginx
@@ -134,7 +154,10 @@ services:
       - stock
       - payment
       - order
+    networks:
+      - app
 
-volumes:
-  grafana_data:
-    
+networks:
+  app:
+    driver: bridge
+    name: payments_app
