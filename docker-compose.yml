@@ -174,10 +174,13 @@ services:
 
   stock:
     build: ./stock
-    container_name: stock
-    ports:
-      - "3133:3133"
     stop_grace_period: 10s
+    deploy:
+      replicas: 5
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 256M
     environment:
       - LOKI_URL=http://loki:3100
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://tempo:4318
@@ -197,10 +200,13 @@ services:
       - app
   payment:
     build: ./payment
-    container_name: payment
-    ports:
-      - "3132:3132"
     stop_grace_period: 10s
+    deploy:
+      replicas: 5
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 256M
     environment:
       - LOKI_URL=http://loki:3100
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://tempo:4318
@@ -215,10 +221,13 @@ services:
       - app
   order:
     build: ./order
-    container_name: order
-    ports:
-      - "3131:3131"
     stop_grace_period: 10s
+    deploy:
+      replicas: 8
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 256M
     environment:
       - REDIS_ADDR=redis-order:6379
       - STOCK_BASE_URL=http://stock:3133

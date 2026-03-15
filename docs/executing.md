@@ -94,10 +94,11 @@ Com `docker-compose up`, sobem também **Prometheus**, **Loki**, **Promtail** e 
 
 **Logs no Loki:** os serviços **order**, **payment** e **stock** enviam logs **diretamente** ao Loki por HTTP (variável `LOKI_URL=http://loki:3100` no Docker). Não é necessário plugin nem Promtail. No Grafana Explore (Loki), use a query `{job="order"}`, `{job="payment"}` ou `{job="stock"}` (ou `{job=~"order|payment|stock"}` para todos).
 
-- **Grafana:** http://localhost:3000 — login `admin` / `admin`. Já vêm provisionados três datasources:
+- **Grafana:** http://localhost:3000 — login `admin` / `admin`. Já vêm provisionados quatro datasources:
   - **Prometheus** (padrão): métricas dos três serviços (latência, contagem de requests por método/path/status, etc.).
   - **Loki:** logs enviados pelas aplicações; filtro por `job` (order, payment, stock).
   - **Tempo:** traces distribuídos (OpenTelemetry); correlação com Loki via **trace to logs**.
+  - **InfluxDB:** métricas do k6 (testes de carga); dashboard **k6 Load Test** na pasta E-commerce.
 
 Há um **dashboard provisionado** na pasta **E-commerce** (menu lateral): **E-commerce services**. Use o filtro **Application** (order, payment, stock) para ver por serviço:
 
@@ -128,3 +129,18 @@ Com `docker-compose up`, o **Tempo** recebe traces OTLP (HTTP na porta 4318) dos
 3. Clique em **Run query** para ver a árvore de spans (Order → Stock reserve, Order → Payment charge, etc.).
 
 **Trace → Logs:** no datasource Tempo está configurado **trace to logs** apontando para o Loki. Ao abrir um span no Tempo, use o link **Logs for this span** (ou equivalente) para ver no Loki os logs do mesmo `request_id`, permitindo inspecionar a mesma request em traces e logs.
+
+---
+
+## Teste de carga (k6)
+
+Há um script **k6** em `load-test/checkout.js` que exercita o checkout com vários cenários: smoke, injeção de erros (400/500), rampa de carga e carga alta (centenas de milhares de requests). Para rodar e enviar métricas ao Grafana:
+
+1. Instale o [k6](https://grafana.com/docs/k6/latest/set-up/install-k6/).
+2. Com o stack no ar (`docker-compose up -d`), execute:  
+   `k6 run --out influxdb=http://localhost:8086/k6 load-test/checkout.js`
+3. No Grafana, abra o dashboard **k6 Load Test** (pasta E-commerce) e ajuste o intervalo de tempo para o período do teste.
+
+O **Stock** no Docker Compose já sobe com `STOCK_INITIAL_QUANTITY=100000` para o item 1, evitando 409/500 por estoque esgotado durante o teste. Se rodar os serviços localmente, defina essa variável no Stock (ex.: `100000`) antes do teste de carga.
+
+Detalhes e exemplos (cenários isolados, duração, VUs) estão em `load-test/README.md`.
