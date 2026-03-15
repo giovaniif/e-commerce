@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -9,12 +10,15 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	_ "github.com/lib/pq"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/giovaniif/e-commerce/stock/domain/item"
+	"github.com/redis/go-redis/v9"
+	"github.com/giovaniif/e-commerce/stock/infra/gateways"
 	"github.com/giovaniif/e-commerce/stock/infra/loki"
 	"github.com/giovaniif/e-commerce/stock/infra/metrics"
 	"github.com/giovaniif/e-commerce/stock/infra/repositories"
@@ -40,10 +44,51 @@ type CompleteRequest struct {
 }
 
 func StartServer() {
-	items := make(map[int32]*item.Item)
-	items[1] = &item.Item{Id: 1, Price: 10, InitialStock: 10}
-	reservations := make(map[int32]*item.Reservation)
-	itemRepository := repositories.NewItemRepository(items, reservations)
+	initialStock := int32(10)
+	if s := os.Getenv("STOCK_INITIAL_QUANTITY"); s != "" {
+		if n, err := strconv.ParseInt(s, 10, 32); err == nil && n > 0 {
+			initialStock = int32(n)
+		}
+	}
+	_ = initialStock // initial stock is seeded via init.sql
+
+	postgresURL := os.Getenv("POSTGRES_URL")
+	if postgresURL == "" {
+		fmt.Println("POSTGRES_URL is required")
+		os.Exit(1)
+	}
+	db, err := sql.Open("postgres", postgresURL)
+	if err != nil {
+		fmt.Printf("Failed to open postgres: %v\n", err)
+		os.Exit(1)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(80)
+	db.SetMaxIdleConns(40)
+	db.SetConnMaxLifetime(5 * time.Minute)
+	if err := db.Ping(); err != nil {
+		fmt.Printf("Failed to ping postgres: %v\n", err)
+		os.Exit(1)
+	}
+	redisAddr := os.Getenv("REDIS_ADDR")
+	if redisAddr == "" {
+		fmt.Println("REDIS_ADDR is required")
+		os.Exit(1)
+	}
+	rdb := redis.NewClient(&redis.Options{Addr: redisAddr})
+	if err := rdb.Ping(context.Background()).Err(); err != nil {
+		fmt.Printf("Failed to ping Redis (%s): %v\n", redisAddr, err)
+		os.Exit(1)
+	}
+
+	itemRepository := repositories.NewItemRepositoryPostgres(db, rdb)
+	if err := itemRepository.SeedStockCounters(context.Background()); err != nil {
+		fmt.Printf("Failed to seed stock counters: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("Stock counters seeded in Redis")
+
+	idempotencyGateway := gateways.NewIdempotencyGatewayRedis(rdb)
 	reserveUseCase := reserve.NewReserve(itemRepository)
 	releaseUseCase := release.NewRelease(itemRepository)
 	completeUseCase := complete.NewComplete(itemRepository)
@@ -57,7 +102,7 @@ func StartServer() {
 		}
 	}
 	slog.SetDefault(slog.New(slog.NewJSONHandler(logOut, &slog.HandlerOptions{Level: slog.LevelInfo})))
-	slog.Info("stock service started", "port", 3133)
+	slog.Info("stock service started", "port", 3133, "initial_stock_item_1", initialStock)
 
 	shutdownTracing := tracing.Init("stock")
 	if shutdownTracing != nil {
@@ -91,17 +136,31 @@ func StartServer() {
 			c.String(http.StatusBadRequest, err.Error())
 			return
 		}
+		ctx := c.Request.Context()
+		requestID := requestid.FromContext(ctx)
+		if idempotencyGateway != nil && requestID != "" {
+			if resId, fee, found, err := idempotencyGateway.ReserveIdempotency(ctx, requestID); err == nil && found {
+				c.JSON(http.StatusOK, gin.H{"reservationId": resId, "totalFee": fee})
+				return
+			}
+		}
 		reservation, err := reserveUseCase.Reserve(reserveRequest.ItemId, reserveRequest.Quantity)
 		if err != nil {
 			switch {
 			case errors.Is(err, repositories.ErrItemNotFound):
+				slog.ErrorContext(ctx, "reserve failed: item not found", "request_id", requestID, "item_id", reserveRequest.ItemId, "quantity", reserveRequest.Quantity, "error", err)
 				c.String(http.StatusNotFound, err.Error())
 			case errors.Is(err, repositories.ErrInsufficientStock):
+				slog.WarnContext(ctx, "reserve failed: insufficient stock", "request_id", requestID, "item_id", reserveRequest.ItemId, "quantity", reserveRequest.Quantity)
 				c.String(http.StatusConflict, err.Error())
 			default:
+				slog.ErrorContext(ctx, "reserve failed", "request_id", requestID, "item_id", reserveRequest.ItemId, "quantity", reserveRequest.Quantity, "error", err)
 				c.String(http.StatusInternalServerError, err.Error())
 			}
 			return
+		}
+		if idempotencyGateway != nil && requestID != "" {
+			_ = idempotencyGateway.SaveReserveResult(ctx, requestID, reservation.ReservationId, reservation.TotalFee)
 		}
 		c.JSON(http.StatusOK, gin.H{"reservationId": reservation.ReservationId, "totalFee": reservation.TotalFee})
 	})
@@ -112,29 +171,48 @@ func StartServer() {
 			c.String(http.StatusBadRequest, err.Error())
 			return
 		}
+		ctx := c.Request.Context()
+		if idempotencyGateway != nil {
+			if found, err := idempotencyGateway.ReleaseIdempotency(ctx, releaseRequest.ReservationId); err == nil && found {
+				c.String(http.StatusOK, "Release successful")
+				return
+			}
+		}
 		err := releaseUseCase.Release(release.Input{ReservationId: releaseRequest.ReservationId})
 		if err != nil {
+			slog.ErrorContext(ctx, "release failed", "request_id", requestid.FromContext(ctx), "reservation_id", releaseRequest.ReservationId, "error", err)
 			c.String(http.StatusInternalServerError, err.Error())
-		} else {
-			c.String(http.StatusOK, "Release successful")
+			return
 		}
+		if idempotencyGateway != nil {
+			_ = idempotencyGateway.SaveReleaseResult(ctx, releaseRequest.ReservationId)
+		}
+		c.String(http.StatusOK, "Release successful")
 	})
 
 	r.POST("/complete", func(c *gin.Context) {
 		var completeRequest CompleteRequest
 		if err := c.ShouldBindJSON(&completeRequest); err != nil {
-			fmt.Println("failed to bind json")
 			c.String(http.StatusBadRequest, err.Error())
 			return
 		}
+		ctx := c.Request.Context()
+		if idempotencyGateway != nil {
+			if found, err := idempotencyGateway.CompleteIdempotency(ctx, completeRequest.ReservationId); err == nil && found {
+				c.String(http.StatusOK, "Complete successful")
+				return
+			}
+		}
 		err := completeUseCase.Complete(complete.Input{ReservationId: completeRequest.ReservationId})
 		if err != nil {
-			fmt.Println("failed to complete stock")
+			slog.ErrorContext(ctx, "complete failed", "request_id", requestid.FromContext(ctx), "reservation_id", completeRequest.ReservationId, "error", err)
 			c.String(http.StatusInternalServerError, err.Error())
-		} else {
-			fmt.Println("complete successful")
-			c.String(http.StatusOK, "Complete successful")
+			return
 		}
+		if idempotencyGateway != nil {
+			_ = idempotencyGateway.SaveCompleteResult(ctx, completeRequest.ReservationId)
+		}
+		c.String(http.StatusOK, "Complete successful")
 	})
 
 	srv := &http.Server{Addr: ":3133", Handler: r}

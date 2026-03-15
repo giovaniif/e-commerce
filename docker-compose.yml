@@ -1,10 +1,49 @@
 services:
-  redis:
+  redis-order:
     image: redis:alpine
-    container_name: redis
+    container_name: redis-order
     ports:
-      - "6379:6379"
+      - "6380:6379"
     stop_grace_period: 5s
+    networks:
+      - app
+
+  redis-payment:
+    image: redis:alpine
+    container_name: redis-payment
+    ports:
+      - "6381:6379"
+    stop_grace_period: 5s
+    networks:
+      - app
+
+  redis-stock:
+    image: redis:alpine
+    container_name: redis-stock
+    ports:
+      - "6382:6379"
+    stop_grace_period: 5s
+    networks:
+      - app
+
+  postgres-stock:
+    image: postgres:16-alpine
+    container_name: postgres-stock
+    ports:
+      - "5432:5432"
+    stop_grace_period: 5s
+    command: ["postgres", "-c", "max_connections=500"]
+    environment:
+      - POSTGRES_DB=stock
+      - POSTGRES_USER=stock
+      - POSTGRES_PASSWORD=stock
+    volumes:
+      - ./stock/db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stock -d stock"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
     networks:
       - app
 
@@ -124,9 +163,18 @@ services:
     environment:
       - LOKI_URL=http://loki:3100
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://tempo:4318
+      - STOCK_INITIAL_QUANTITY=1000000000
+      - POSTGRES_URL=postgres://stock:stock@postgres-stock:5432/stock?sslmode=disable
+      - REDIS_ADDR=redis-stock:6379
     depends_on:
-      - loki
-      - tempo
+      loki:
+        condition: service_started
+      tempo:
+        condition: service_started
+      postgres-stock:
+        condition: service_healthy
+      redis-stock:
+        condition: service_started
     networks:
       - app
   payment:
@@ -150,13 +198,13 @@ services:
       - "3131:3131"
     stop_grace_period: 10s
     environment:
-      - REDIS_ADDR=redis:6379
+      - REDIS_ADDR=redis-order:6379
       - STOCK_BASE_URL=http://stock:3133
       - PAYMENT_BASE_URL=http://payment:3132
       - LOKI_URL=http://loki:3100
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://tempo:4318
     depends_on:
-      - redis
+      - redis-order
       - stock
       - payment
       - loki
