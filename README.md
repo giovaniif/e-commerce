@@ -1,4 +1,4 @@
-# 💳 Payments System - Projeto de Estudos
+# Payments System - Projeto de Estudos
 
 ## Descrição do projeto e arquitetura
 
