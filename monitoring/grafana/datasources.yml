@@ -2,6 +2,7 @@ apiVersion: 1
 datasources:
   - name: Prometheus
     type: prometheus
+    uid: prometheus
     access: proxy
     url: http://prometheus:9090
     isDefault: true
@@ -21,3 +22,9 @@ datasources:
         filterByTraceID: true
         mapTagNamesEnabled: false
       tracesToMetrics: []
+  - name: InfluxDB
+    type: influxdb
+    uid: influxdb
+    access: proxy
+    url: http://influxdb:8086
+    database: k6
