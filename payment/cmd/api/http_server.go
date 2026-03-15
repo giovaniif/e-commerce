@@ -12,13 +12,17 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
 	"github.com/giovaniif/e-commerce/payment/infra/gateways"
 	"github.com/giovaniif/e-commerce/payment/infra/loki"
 	"github.com/giovaniif/e-commerce/payment/infra/metrics"
 	"github.com/giovaniif/e-commerce/payment/infra/requestid"
 	"github.com/giovaniif/e-commerce/payment/infra/tracing"
+	"github.com/giovaniif/e-commerce/payment/protocols"
 	charge "github.com/giovaniif/e-commerce/payment/use_cases"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 type ChargeRequest struct {
@@ -43,8 +47,39 @@ func StartServer() {
 	}
 
 	r := gin.Default()
-	chargeGateway := gateways.NewChargeGatewayMemory()
-	idempotencyGateway := gateways.NewIdempotencyGatewayMemory()
+
+	var chargeGateway protocols.ChargeGateway
+	if mongoURL := os.Getenv("MONGO_URL"); mongoURL != "" {
+		mongoClient, err := mongo.Connect(options.Client().ApplyURI(mongoURL))
+		if err != nil {
+			slog.Warn("failed to connect to MongoDB, using in-memory charge gateway", "error", err)
+			chargeGateway = gateways.NewChargeGatewayMemory()
+		} else if err := mongoClient.Ping(context.Background(), nil); err != nil {
+			slog.Warn("failed to ping MongoDB, using in-memory charge gateway", "error", err)
+			chargeGateway = gateways.NewChargeGatewayMemory()
+		} else {
+			chargeGateway = gateways.NewChargeGatewayMongo(mongoClient)
+			slog.Info("charge gateway: MongoDB")
+		}
+	} else {
+		slog.Warn("MONGO_URL not set, using in-memory charge gateway")
+		chargeGateway = gateways.NewChargeGatewayMemory()
+	}
+
+	var idempotencyGateway protocols.IdempotencyGateway
+	if redisAddr := os.Getenv("REDIS_ADDR"); redisAddr != "" {
+		rdb := redis.NewClient(&redis.Options{Addr: redisAddr})
+		if err := rdb.Ping(context.Background()).Err(); err != nil {
+			slog.Warn("failed to ping Redis, using in-memory idempotency gateway", "error", err)
+			idempotencyGateway = gateways.NewIdempotencyGatewayMemory()
+		} else {
+			idempotencyGateway = gateways.NewIdempotencyGatewayRedis(rdb)
+			slog.Info("idempotency gateway: Redis")
+		}
+	} else {
+		slog.Warn("REDIS_ADDR not set, using in-memory idempotency gateway")
+		idempotencyGateway = gateways.NewIdempotencyGatewayMemory()
+	}
 
 	r.Use(func(c *gin.Context) {
 		id := c.GetHeader("X-Request-ID")
@@ -78,11 +113,13 @@ func StartServer() {
 			c.String(http.StatusBadRequest, err.Error())
 			return
 		}
+		requestID := requestid.FromContext(c.Request.Context())
 		err := chargeUseCase.Charge(charge.ChargeInput{
 			IdempotencyKey: idempotencyKey,
 			Amount:         chargeRequest.Amount,
 		})
 		if err != nil {
+			slog.ErrorContext(c.Request.Context(), "charge failed", "request_id", requestID, "amount", chargeRequest.Amount, "error", err)
 			c.String(http.StatusInternalServerError, err.Error())
 		} else {
 			c.String(http.StatusOK, "Charge successful")

@@ -3,6 +3,7 @@ package checkout
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"math"
 	"time"
 
@@ -11,16 +12,17 @@ import (
 )
 
 var (
-	MAX_RETRIES = 5
-	BASE_DELAY  = 1 * time.Second
+	MAX_RETRIES = 2
+	BASE_DELAY  = 100 * time.Millisecond
 )
 
-func NewCheckout(stockGateway protocols.StockGateway, paymentGateway protocols.PaymentGateway, checkoutGateway protocols.CheckoutGateway, sleeper protocols.Sleeper) *Checkout {
+func NewCheckout(stockGateway protocols.StockGateway, paymentGateway protocols.PaymentGateway, checkoutGateway protocols.CheckoutGateway, sleeper protocols.Sleeper, orderGateway protocols.OrderGateway) *Checkout {
 	return &Checkout{
 		stockGateway:    stockGateway,
 		paymentGateway:  paymentGateway,
 		checkoutGateway: checkoutGateway,
 		sleeper:         sleeper,
+		orderGateway:    orderGateway,
 	}
 }
 
@@ -83,6 +85,9 @@ func (c *Checkout) Checkout(ctx context.Context, input Input) error {
 	}
 
 	success = true
+	if err := c.orderGateway.SaveOrder(ctx, input.IdempotencyKey, input.ItemId, input.Quantity); err != nil {
+		slog.ErrorContext(ctx, "failed to save order", "error", err)
+	}
 	return nil
 }
 
@@ -131,4 +136,5 @@ type Checkout struct {
 	paymentGateway  protocols.PaymentGateway
 	checkoutGateway protocols.CheckoutGateway
 	sleeper         protocols.Sleeper
+	orderGateway    protocols.OrderGateway
 }
