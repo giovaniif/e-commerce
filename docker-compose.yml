@@ -26,6 +26,24 @@ services:
     networks:
       - app
 
+  mongo-order:
+    image: mongo:7
+    container_name: mongo-order
+    ports:
+      - "27017:27017"
+    stop_grace_period: 5s
+    networks:
+      - app
+
+  mongo-payment:
+    image: mongo:7
+    container_name: mongo-payment
+    ports:
+      - "27018:27017"
+    stop_grace_period: 5s
+    networks:
+      - app
+
   postgres-stock:
     image: postgres:16-alpine
     container_name: postgres-stock
@@ -186,9 +204,13 @@ services:
     environment:
       - LOKI_URL=http://loki:3100
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://tempo:4318
+      - REDIS_ADDR=redis-payment:6379
+      - MONGO_URL=mongodb://mongo-payment:27017
     depends_on:
       - loki
       - tempo
+      - redis-payment
+      - mongo-payment
     networks:
       - app
   order:
@@ -203,8 +225,10 @@ services:
       - PAYMENT_BASE_URL=http://payment:3132
       - LOKI_URL=http://loki:3100
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://tempo:4318
+      - MONGO_URL=mongodb://mongo-order:27017
     depends_on:
       - redis-order
+      - mongo-order
       - stock
       - payment
       - loki

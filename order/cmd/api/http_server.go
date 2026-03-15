@@ -23,6 +23,8 @@ import (
 	"github.com/giovaniif/e-commerce/order/infra/tracing"
 	"github.com/giovaniif/e-commerce/order/protocols"
 	checkout "github.com/giovaniif/e-commerce/order/use_cases"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 const defaultCheckoutTimeoutSec = 30
@@ -42,7 +44,13 @@ func StartServer() {
 		paymentBaseURL = "http://localhost:3132"
 	}
 
-	httpClient := &http.Client{}
+	httpClient := &http.Client{
+		Transport: &http.Transport{
+			MaxIdleConns:        2000,
+			MaxIdleConnsPerHost: 1000,
+			IdleConnTimeout:     90 * time.Second,
+		},
+	}
 	stockGateway := gateways.NewStockGatewayHttp(httpClient, stockBaseURL)
 	paymentGateway := gateways.NewPaymentGatewayHttp(httpClient, paymentBaseURL)
 
@@ -62,7 +70,26 @@ func StartServer() {
 	}
 
 	sleeperGateway := gateways.NewSleeper()
-	checkoutUseCase := checkout.NewCheckout(stockGateway, paymentGateway, checkoutGateway, sleeperGateway)
+
+	var orderGateway protocols.OrderGateway
+	if mongoURL := os.Getenv("MONGO_URL"); mongoURL != "" {
+		mongoClient, err := mongo.Connect(options.Client().ApplyURI(mongoURL))
+		if err != nil {
+			fmt.Printf("MongoDB connect failed (%s), using noop order gateway: %v\n", mongoURL, err)
+			orderGateway = &OrderGatewayNoop{}
+		} else if err := mongoClient.Ping(context.Background(), nil); err != nil {
+			fmt.Printf("MongoDB ping failed (%s), using noop order gateway: %v\n", mongoURL, err)
+			orderGateway = &OrderGatewayNoop{}
+		} else {
+			orderGateway = gateways.NewOrderGatewayMongo(mongoClient)
+			fmt.Println("Order gateway: MongoDB")
+		}
+	} else {
+		orderGateway = &OrderGatewayNoop{}
+		fmt.Println("Order gateway: noop (set MONGO_URL for MongoDB)")
+	}
+
+	checkoutUseCase := checkout.NewCheckout(stockGateway, paymentGateway, checkoutGateway, sleeperGateway, orderGateway)
 
 	logOut := io.Writer(os.Stdout)
 	var lokiWriter *loki.Writer
@@ -136,6 +163,7 @@ func StartServer() {
 			return
 		}
 
+		requestID := requestid.FromContext(contextWithTimeout)
 		err := checkoutUseCase.Checkout(contextWithTimeout, checkout.Input{
 			ItemId:         checkoutRequest.ItemId,
 			Quantity:       checkoutRequest.Quantity,
@@ -143,8 +171,10 @@ func StartServer() {
 		})
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+				slog.ErrorContext(contextWithTimeout, "checkout timeout", "request_id", requestID, "item_id", checkoutRequest.ItemId, "quantity", checkoutRequest.Quantity, "error", err)
 				c.String(http.StatusGatewayTimeout, err.Error())
 			} else {
+				slog.ErrorContext(contextWithTimeout, "checkout failed", "request_id", requestID, "item_id", checkoutRequest.ItemId, "quantity", checkoutRequest.Quantity, "error", err)
 				c.String(http.StatusInternalServerError, err.Error())
 			}
 		} else {
@@ -177,4 +207,10 @@ func StartServer() {
 	} else {
 		fmt.Println("Order stopped")
 	}
+}
+
+type OrderGatewayNoop struct{}
+
+func (g *OrderGatewayNoop) SaveOrder(ctx context.Context, idempotencyKey string, itemId int32, quantity int32) error {
+	return nil
 }
