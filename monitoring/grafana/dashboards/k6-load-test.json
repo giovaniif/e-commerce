@@ -1,0 +1,468 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "graphTooltip": 1,
+  "id": null,
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 1,
+      "title": "Scale",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "influxdb", "uid": "influxdb" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "drawStyle": "line", "fillOpacity": 20, "lineInterpolation": "stepAfter", "lineWidth": 2, "spanNulls": false },
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 1 },
+      "id": 2,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true } },
+      "targets": [
+        {
+          "datasource": { "type": "influxdb", "uid": "influxdb" },
+          "query": "SELECT last(\"value\") FROM \"vus\" WHERE $timeFilter GROUP BY time($__interval) fill(null)",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "Virtual Users (VUs)",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 7 },
+      "id": 10,
+      "title": "Performance Degradation",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "influxdb", "uid": "influxdb" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineInterpolation": "smooth", "lineWidth": 2, "spanNulls": false },
+          "unit": "ms",
+          "min": 0
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "baseline" }, "properties": [{ "id": "color", "value": { "fixedColor": "#73BF69", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "low" },      "properties": [{ "id": "color", "value": { "fixedColor": "#5794F2", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "medium" },   "properties": [{ "id": "color", "value": { "fixedColor": "#FADE2A", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "high" },     "properties": [{ "id": "color", "value": { "fixedColor": "#FF9830", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "stress" },   "properties": [{ "id": "color", "value": { "fixedColor": "#F2495C", "mode": "fixed" } }] }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "id": 11,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true } },
+      "targets": [
+        {
+          "datasource": { "type": "influxdb", "uid": "influxdb" },
+          "query": "SELECT percentile(\"value\", 95) FROM \"http_req_duration\" WHERE $timeFilter GROUP BY time($__interval), \"scenario\" fill(none)",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "p95 Latency by Stage",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "influxdb", "uid": "influxdb" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineInterpolation": "smooth", "lineWidth": 2, "spanNulls": false },
+          "unit": "ms",
+          "min": 0
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "baseline" }, "properties": [{ "id": "color", "value": { "fixedColor": "#73BF69", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "low" },      "properties": [{ "id": "color", "value": { "fixedColor": "#5794F2", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "medium" },   "properties": [{ "id": "color", "value": { "fixedColor": "#FADE2A", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "high" },     "properties": [{ "id": "color", "value": { "fixedColor": "#FF9830", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "stress" },   "properties": [{ "id": "color", "value": { "fixedColor": "#F2495C", "mode": "fixed" } }] }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "id": 12,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true } },
+      "targets": [
+        {
+          "datasource": { "type": "influxdb", "uid": "influxdb" },
+          "query": "SELECT percentile(\"value\", 99) FROM \"http_req_duration\" WHERE $timeFilter GROUP BY time($__interval), \"scenario\" fill(none)",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "p99 Latency by Stage",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "influxdb", "uid": "influxdb" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineInterpolation": "smooth", "lineWidth": 2, "spanNulls": false },
+          "unit": "reqps",
+          "min": 0
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "baseline" }, "properties": [{ "id": "color", "value": { "fixedColor": "#73BF69", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "low" },      "properties": [{ "id": "color", "value": { "fixedColor": "#5794F2", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "medium" },   "properties": [{ "id": "color", "value": { "fixedColor": "#FADE2A", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "high" },     "properties": [{ "id": "color", "value": { "fixedColor": "#FF9830", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "stress" },   "properties": [{ "id": "color", "value": { "fixedColor": "#F2495C", "mode": "fixed" } }] }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "id": 13,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true } },
+      "targets": [
+        {
+          "datasource": { "type": "influxdb", "uid": "influxdb" },
+          "query": "SELECT sum(\"value\") FROM \"http_reqs\" WHERE $timeFilter GROUP BY time($__interval), \"scenario\" fill(0)",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "Request Rate by Stage",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "influxdb", "uid": "influxdb" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineInterpolation": "smooth", "lineWidth": 2, "spanNulls": false },
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "baseline" }, "properties": [{ "id": "color", "value": { "fixedColor": "#73BF69", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "low" },      "properties": [{ "id": "color", "value": { "fixedColor": "#5794F2", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "medium" },   "properties": [{ "id": "color", "value": { "fixedColor": "#FADE2A", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "high" },     "properties": [{ "id": "color", "value": { "fixedColor": "#FF9830", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "stress" },   "properties": [{ "id": "color", "value": { "fixedColor": "#F2495C", "mode": "fixed" } }] }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "id": 14,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true } },
+      "targets": [
+        {
+          "datasource": { "type": "influxdb", "uid": "influxdb" },
+          "query": "SELECT mean(\"value\") FROM \"http_req_failed\" WHERE $timeFilter GROUP BY time($__interval), \"scenario\" fill(none)",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "Error Rate by Stage",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 24 },
+      "id": 20,
+      "title": "Business Impact",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "influxdb", "uid": "influxdb" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "fixedColor": "green", "mode": "fixed" },
+          "unit": "short",
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 25 },
+      "id": 21,
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["sum"], "fields": "", "values": false }, "textMode": "auto" },
+      "targets": [
+        {
+          "datasource": { "type": "influxdb", "uid": "influxdb" },
+          "query": "SELECT sum(\"value\") FROM \"orders_initiated\" WHERE $timeFilter",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "Total Orders Initiated",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "influxdb", "uid": "influxdb" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "fixedColor": "red", "mode": "fixed" },
+          "unit": "short",
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }] }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 25 },
+      "id": 22,
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["sum"], "fields": "", "values": false }, "textMode": "auto" },
+      "targets": [
+        {
+          "datasource": { "type": "influxdb", "uid": "influxdb" },
+          "query": "SELECT sum(\"value\") FROM \"orders_lost\" WHERE $timeFilter",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "Total Orders Lost",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "influxdb", "uid": "influxdb" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "fixedColor": "orange", "mode": "fixed" },
+          "unit": "currencyUSD",
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "orange", "value": null }] }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 25 },
+      "id": 23,
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["sum"], "fields": "", "values": false }, "textMode": "auto" },
+      "targets": [
+        {
+          "datasource": { "type": "influxdb", "uid": "influxdb" },
+          "query": "SELECT sum(\"value\") FROM \"revenue_lost\" WHERE $timeFilter",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "Total Revenue Lost",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "influxdb", "uid": "influxdb" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "fixedColor": "blue", "mode": "fixed" },
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 0.95 },
+              { "color": "green", "value": 0.99 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 25 },
+      "id": 24,
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "/^Success Rate$/", "values": false }, "textMode": "auto" },
+      "targets": [
+        {
+          "datasource": { "type": "influxdb", "uid": "influxdb" },
+          "query": "SELECT sum(\"value\") FROM \"orders_succeeded\" WHERE $timeFilter",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series",
+          "hide": true
+        },
+        {
+          "datasource": { "type": "influxdb", "uid": "influxdb" },
+          "query": "SELECT sum(\"value\") FROM \"orders_initiated\" WHERE $timeFilter",
+          "rawQuery": true,
+          "refId": "B",
+          "resultFormat": "time_series",
+          "hide": true
+        },
+        {
+          "datasource": { "type": "__expr__", "uid": "__expr__" },
+          "expression": "$A / $B",
+          "refId": "Success Rate",
+          "type": "math"
+        }
+      ],
+      "title": "Overall Success Rate",
+      "type": "stat"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 28 },
+      "id": 30,
+      "title": "Service Resources",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineInterpolation": "smooth", "lineWidth": 2, "spanNulls": false },
+          "unit": "percent",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 29 },
+      "id": 31,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (job) (rate(process_cpu_seconds_total{job=~\"order|payment|stock\"}[1m])) * 100",
+          "legendFormat": "{{job}}",
+          "refId": "A"
+        }
+      ],
+      "title": "CPU Usage % (per service)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineInterpolation": "smooth", "lineWidth": 2, "spanNulls": false },
+          "unit": "percent",
+          "min": 0,
+          "max": 100
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 29 },
+      "id": 32,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (job) (process_resident_memory_bytes{job=~\"order|payment|stock\"}) / scalar(node_memory_MemTotal_bytes) * 100",
+          "legendFormat": "{{job}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Memory Usage % of total RAM (per service)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "influxdb", "uid": "influxdb" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "drawStyle": "line", "fillOpacity": 15, "lineInterpolation": "smooth", "lineWidth": 2, "spanNulls": false },
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "orders_lost" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } },
+              { "id": "custom.fillOpacity", "value": 30 }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "orders_initiated" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "blue", "mode": "fixed" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "orders_succeeded" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }
+            ]
+          }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 37 },
+      "id": 25,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true } },
+      "targets": [
+        {
+          "datasource": { "type": "influxdb", "uid": "influxdb" },
+          "query": "SELECT sum(\"value\") FROM \"orders_initiated\" WHERE $timeFilter GROUP BY time($__interval) fill(0)",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        },
+        {
+          "datasource": { "type": "influxdb", "uid": "influxdb" },
+          "query": "SELECT sum(\"value\") FROM \"orders_succeeded\" WHERE $timeFilter GROUP BY time($__interval) fill(0)",
+          "rawQuery": true,
+          "refId": "B",
+          "resultFormat": "time_series"
+        },
+        {
+          "datasource": { "type": "influxdb", "uid": "influxdb" },
+          "query": "SELECT sum(\"value\") FROM \"orders_lost\" WHERE $timeFilter GROUP BY time($__interval) fill(0)",
+          "rawQuery": true,
+          "refId": "C",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "Orders Initiated vs Succeeded vs Lost",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "influxdb", "uid": "influxdb" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "fixedColor": "orange", "mode": "fixed" },
+          "custom": { "drawStyle": "line", "fillOpacity": 25, "lineInterpolation": "smooth", "lineWidth": 2, "spanNulls": false },
+          "unit": "currencyUSD",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 37 },
+      "id": 26,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true } },
+      "targets": [
+        {
+          "datasource": { "type": "influxdb", "uid": "influxdb" },
+          "query": "SELECT sum(\"value\") FROM \"revenue_lost\" WHERE $timeFilter GROUP BY time($__interval) fill(0)",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "Revenue Lost Over Time",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["k6", "load-test"],
+  "templating": { "list": [] },
+  "time": { "from": "now-15m", "to": "now" },
+  "timepicker": {},
+  "timezone": "",
+  "title": "k6 Load Test",
+  "uid": "k6-load-test",
+  "version": 2,
+  "weekStart": ""
+}

@@ -13,6 +13,11 @@ distributor:
 ingester:
   max_block_duration: 5m
 
+overrides:
+  defaults:
+    ingestion:
+      max_traces_per_user: 0
+
 storage:
   trace:
     backend: local

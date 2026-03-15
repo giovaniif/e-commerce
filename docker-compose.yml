@@ -8,6 +8,15 @@ services:
     networks:
       - app
 
+  node_exporter:
+    image: prom/node-exporter:v1.7.0
+    container_name: node_exporter
+    ports:
+      - "9100:9100"
+    stop_grace_period: 5s
+    networks:
+      - app
+
   prometheus:
     image: prom/prometheus:v2.47.0
     container_name: prometheus
@@ -67,6 +76,17 @@ services:
     networks:
       - app
 
+  influxdb:
+    image: influxdb:1.8
+    container_name: influxdb
+    ports:
+      - "8086:8086"
+    stop_grace_period: 5s
+    environment:
+      - INFLUXDB_DB=k6
+    networks:
+      - app
+
   grafana:
     image: grafana/grafana:10.2.2
     container_name: grafana
@@ -91,6 +111,7 @@ services:
       - prometheus
       - loki
       - tempo
+      - influxdb
     networks:
       - app
 

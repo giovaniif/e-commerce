@@ -3,14 +3,20 @@ global:
   evaluation_interval: 15s
 
 scrape_configs:
+  - job_name: "node_exporter"
+    static_configs:
+      - targets: ["node_exporter:9100"]
+
   - job_name: "order"
     static_configs:
       - targets: ["order:3131"]
     metrics_path: /metrics
+
   - job_name: "payment"
     static_configs:
       - targets: ["payment:3132"]
     metrics_path: /metrics
+
   - job_name: "stock"
     static_configs:
       - targets: ["stock:3133"]
