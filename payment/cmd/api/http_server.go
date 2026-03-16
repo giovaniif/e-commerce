@@ -2,32 +2,32 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/redis/go-redis/v9"
+	_ "github.com/lib/pq"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/giovaniif/e-commerce/payment/infra/gateways"
+	kafkaconsumer "github.com/giovaniif/e-commerce/payment/infra/kafka"
 	"github.com/giovaniif/e-commerce/payment/infra/loki"
 	"github.com/giovaniif/e-commerce/payment/infra/metrics"
+	"github.com/giovaniif/e-commerce/payment/infra/repositories"
 	"github.com/giovaniif/e-commerce/payment/infra/requestid"
 	"github.com/giovaniif/e-commerce/payment/infra/tracing"
 	"github.com/giovaniif/e-commerce/payment/protocols"
-	charge "github.com/giovaniif/e-commerce/payment/use_cases"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
+	charge_from_event "github.com/giovaniif/e-commerce/payment/use_cases"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
-
-type ChargeRequest struct {
-	Amount float64 `json:"amount"`
-}
 
 func StartServer() {
 	logOut := io.Writer(os.Stdout)
@@ -66,19 +66,44 @@ func StartServer() {
 		chargeGateway = gateways.NewChargeGatewayMemory()
 	}
 
-	var idempotencyGateway protocols.IdempotencyGateway
-	if redisAddr := os.Getenv("REDIS_ADDR"); redisAddr != "" {
-		rdb := redis.NewClient(&redis.Options{Addr: redisAddr})
-		if err := rdb.Ping(context.Background()).Err(); err != nil {
-			slog.Warn("failed to ping Redis, using in-memory idempotency gateway", "error", err)
-			idempotencyGateway = gateways.NewIdempotencyGatewayMemory()
+	// Postgres for outbox and processed_events
+	var db *sql.DB
+	if postgresURL := os.Getenv("POSTGRES_URL"); postgresURL != "" {
+		var err error
+		db, err = sql.Open("postgres", postgresURL)
+		if err != nil {
+			slog.Warn("failed to open postgres", "error", err)
 		} else {
-			idempotencyGateway = gateways.NewIdempotencyGatewayRedis(rdb)
-			slog.Info("idempotency gateway: Redis")
+			db.SetMaxOpenConns(40)
+			db.SetMaxIdleConns(20)
+			db.SetConnMaxLifetime(5 * time.Minute)
+			if err := db.Ping(); err != nil {
+				slog.Warn("failed to ping postgres", "error", err)
+				db = nil
+			} else {
+				slog.Info("postgres connected for payment outbox")
+				defer db.Close()
+			}
 		}
+	}
+
+	// Start Kafka consumer
+	kafkaBrokers := strings.Split(os.Getenv("KAFKA_BROKERS"), ",")
+	if len(kafkaBrokers) > 0 && kafkaBrokers[0] != "" && db != nil {
+		outboxRepo := repositories.NewOutboxRepository(db)
+		processedRepo := repositories.NewProcessedEventsRepository(db)
+		chargeHandler := charge_from_event.NewChargeFromEvent(chargeGateway, outboxRepo, processedRepo, db)
+		consumer := kafkaconsumer.NewConsumer(kafkaBrokers, "stock.StockReserved", "payment-stock-consumer", chargeHandler)
+
+		ctx, cancelConsumer := context.WithCancel(context.Background())
+		go consumer.Run(ctx)
+		defer func() {
+			cancelConsumer()
+			consumer.Close()
+		}()
+		slog.Info("Kafka consumer started", "brokers", kafkaBrokers, "topic", "stock.StockReserved")
 	} else {
-		slog.Warn("REDIS_ADDR not set, using in-memory idempotency gateway")
-		idempotencyGateway = gateways.NewIdempotencyGatewayMemory()
+		slog.Warn("KAFKA_BROKERS not set or postgres unavailable, Kafka consumer not started")
 	}
 
 	r.Use(func(c *gin.Context) {
@@ -99,31 +124,6 @@ func StartServer() {
 	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "healthy"})
-	})
-
-	r.POST("/charge", func(c *gin.Context) {
-		chargeUseCase := charge.NewCharge(chargeGateway, idempotencyGateway)
-		idempotencyKey := c.GetHeader("Idempotency-Key")
-		if idempotencyKey == "" {
-			c.String(http.StatusBadRequest, "Idempotency-Key header is required")
-			return
-		}
-		var chargeRequest ChargeRequest
-		if err := c.ShouldBindJSON(&chargeRequest); err != nil {
-			c.String(http.StatusBadRequest, err.Error())
-			return
-		}
-		requestID := requestid.FromContext(c.Request.Context())
-		err := chargeUseCase.Charge(charge.ChargeInput{
-			IdempotencyKey: idempotencyKey,
-			Amount:         chargeRequest.Amount,
-		})
-		if err != nil {
-			slog.ErrorContext(c.Request.Context(), "charge failed", "request_id", requestID, "amount", chargeRequest.Amount, "error", err)
-			c.String(http.StatusInternalServerError, err.Error())
-		} else {
-			c.String(http.StatusOK, "Charge successful")
-		}
 	})
 
 	srv := &http.Server{Addr: ":3132", Handler: r}

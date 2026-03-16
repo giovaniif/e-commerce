@@ -3,9 +3,11 @@ package repositories
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 
+	"github.com/lib/pq"
 	"github.com/redis/go-redis/v9"
 	_ "github.com/lib/pq"
 	"github.com/giovaniif/e-commerce/stock/domain/item"
@@ -69,7 +71,7 @@ func (r *ItemRepositoryPostgres) GetItem(itemId int32) (*item.Item, error) {
 	return &it, nil
 }
 
-func (r *ItemRepositoryPostgres) Reserve(reservationItem *item.Item, quantity int32) (*item.Reservation, error) {
+func (r *ItemRepositoryPostgres) Reserve(reservationItem *item.Item, quantity int32, orderId string, idempotencyKey string, traceparent string) (*item.Reservation, error) {
 	ctx := context.Background()
 	key := fmt.Sprintf("stock:item:%d", reservationItem.Id)
 
@@ -79,45 +81,110 @@ func (r *ItemRepositoryPostgres) Reserve(reservationItem *item.Item, quantity in
 		return nil, fmt.Errorf("redis decr stock: %w", err)
 	}
 	if remaining < 0 {
-		// Not enough stock — compensate and reject.
+		// Not enough stock — compensate and write StockReservationFailed to outbox.
 		r.rdb.IncrBy(ctx, key, int64(quantity))
+		if err := r.writeFailedReservationOutbox(ctx, orderId, idempotencyKey, reservationItem.Id, quantity, traceparent); err != nil {
+			return nil, fmt.Errorf("write failed reservation outbox: %w", err)
+		}
 		return nil, ErrInsufficientStock
 	}
 
-	// Postgres is now append-only — no transaction or FOR UPDATE needed.
 	var reservationId int64
 	if err := r.db.QueryRow(`SELECT nextval('reservation_id_seq')`).Scan(&reservationId); err != nil {
 		r.rdb.IncrBy(ctx, key, int64(quantity))
 		return nil, fmt.Errorf("next reservation id: %w", err)
 	}
 
-	_, err = r.db.Exec(`
-		INSERT INTO stock_events (reservation_id, item_id, event_type, quantity)
-		VALUES ($1, $2, 'reserved', $3)
-	`, reservationId, reservationItem.Id, quantity)
+	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		r.rdb.IncrBy(ctx, key, int64(quantity))
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO stock_events (reservation_id, item_id, event_type, quantity, idempotency_key, traceparent, order_id)
+		VALUES ($1, $2, 'reserved', $3, $4, $5, $6)
+	`, reservationId, reservationItem.Id, quantity, idempotencyKey, traceparent, orderId)
+	if err != nil {
+		r.rdb.IncrBy(ctx, key, int64(quantity))
+		if isUniqueViolation(err) {
+			return nil, ErrAlreadyProcessed
+		}
 		return nil, fmt.Errorf("insert reserved event: %w", err)
+	}
+
+	totalFee := float64(quantity) * reservationItem.Price
+	payload, _ := json.Marshal(map[string]interface{}{
+		"order_id":        orderId,
+		"idempotency_key": idempotencyKey,
+		"item_id":         reservationItem.Id,
+		"quantity":        quantity,
+		"reservation_id":  reservationId,
+		"total_fee":       totalFee,
+		"traceparent":     traceparent,
+	})
+
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO outbox (aggregate_type, aggregate_id, type, payload, traceparent)
+		VALUES ('STOCK', $1, 'StockReserved', $2, $3)
+	`, orderId, payload, traceparent)
+	if err != nil {
+		r.rdb.IncrBy(ctx, key, int64(quantity))
+		return nil, fmt.Errorf("insert outbox StockReserved: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		r.rdb.IncrBy(ctx, key, int64(quantity))
+		return nil, err
 	}
 
 	return &item.Reservation{
 		Id:       int32(reservationId),
-		TotalFee: float64(quantity) * reservationItem.Price,
+		TotalFee: totalFee,
 		Quantity: quantity,
 		ItemId:   reservationItem.Id,
 		Status:   "reserved",
 	}, nil
 }
 
-func (r *ItemRepositoryPostgres) ReleaseReservation(reservationId int32) error {
+func (r *ItemRepositoryPostgres) writeFailedReservationOutbox(ctx context.Context, orderId, idempotencyKey string, itemId int32, quantity int32, traceparent string) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	payload, _ := json.Marshal(map[string]interface{}{
+		"order_id":        orderId,
+		"idempotency_key": idempotencyKey,
+		"item_id":         itemId,
+		"quantity":        quantity,
+		"reason":          "insufficient stock",
+		"traceparent":     traceparent,
+	})
+
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO outbox (aggregate_type, aggregate_id, type, payload, traceparent)
+		VALUES ('STOCK', $1, 'StockReservationFailed', $2, $3)
+	`, orderId, payload, traceparent)
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (r *ItemRepositoryPostgres) ReleaseReservation(reservationId int32, traceparent string) error {
 	ctx := context.Background()
 
 	var quantity int32
 	var itemId int32
+	var orderId string
+	var idempotencyKey string
 	err := r.db.QueryRow(`
-		SELECT quantity, item_id FROM stock_events
+		SELECT quantity, item_id, order_id, idempotency_key FROM stock_events
 		WHERE reservation_id = $1 AND event_type = 'reserved'
-	`, reservationId).Scan(&quantity, &itemId)
+	`, reservationId).Scan(&quantity, &itemId, &orderId, &idempotencyKey)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return errors.New("reservation not found")
@@ -129,11 +196,36 @@ func (r *ItemRepositoryPostgres) ReleaseReservation(reservationId int32) error {
 	key := fmt.Sprintf("stock:item:%d", itemId)
 	r.rdb.IncrBy(ctx, key, int64(quantity))
 
-	_, err = r.db.Exec(`
-		INSERT INTO stock_events (reservation_id, item_id, event_type, quantity)
-		VALUES ($1, $2, 'released', $3)
-	`, reservationId, itemId, quantity)
-	return err
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO stock_events (reservation_id, item_id, event_type, quantity, traceparent, order_id)
+		VALUES ($1, $2, 'released', $3, $4, $5)
+	`, reservationId, itemId, quantity, traceparent, orderId)
+	if err != nil {
+		return fmt.Errorf("insert released event: %w", err)
+	}
+
+	payload, _ := json.Marshal(map[string]interface{}{
+		"order_id":        orderId,
+		"idempotency_key": idempotencyKey,
+		"reservation_id":  reservationId,
+		"traceparent":     traceparent,
+	})
+
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO outbox (aggregate_type, aggregate_id, type, payload, traceparent)
+		VALUES ('STOCK', $1, 'StockReleased', $2, $3)
+	`, orderId, payload, traceparent)
+	if err != nil {
+		return fmt.Errorf("insert outbox StockReleased: %w", err)
+	}
+
+	return tx.Commit()
 }
 
 func (r *ItemRepositoryPostgres) CompleteReservation(reservationId int32) error {
@@ -155,4 +247,9 @@ func (r *ItemRepositoryPostgres) CompleteReservation(reservationId int32) error 
 		`, reservationId, itemId, quantity)
 	}()
 	return nil
+}
+
+func isUniqueViolation(err error) bool {
+	var pgErr *pq.Error
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }

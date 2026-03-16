@@ -9,8 +9,9 @@ import (
 )
 
 var (
-	ErrItemNotFound     = errors.New("item not found")
+	ErrItemNotFound      = errors.New("item not found")
 	ErrInsufficientStock = errors.New("insufficient stock")
+	ErrAlreadyProcessed  = errors.New("already processed")
 )
 
 type ItemRepository struct {
@@ -40,7 +41,7 @@ func (r *ItemRepository) GetItem(itemId int32) (*item.Item, error) {
 	return repositoryItem, nil
 }
 
-func (r *ItemRepository) Reserve(reservationItem *item.Item, quantity int32) (*item.Reservation, error) {
+func (r *ItemRepository) Reserve(reservationItem *item.Item, quantity int32, orderId string, idempotencyKey string, traceparent string) (*item.Reservation, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if reservationItem.GetAvailableStock() < quantity {
@@ -49,17 +50,17 @@ func (r *ItemRepository) Reserve(reservationItem *item.Item, quantity int32) (*i
 
 	newId := int32(len(r.reservations) + 1)
 	reservation := &item.Reservation{
-		Id: newId,
+		Id:       newId,
 		TotalFee: float64(quantity) * reservationItem.Price,
 		Quantity: quantity,
-		ItemId: reservationItem.Id,
-		Status: "reserved",
+		ItemId:   reservationItem.Id,
+		Status:   "reserved",
 	}
 	r.reservations[newId] = reservation
 	return reservation, nil
 }
 
-func (r *ItemRepository) ReleaseReservation(reservationId int32) error {
+func (r *ItemRepository) ReleaseReservation(reservationId int32, traceparent string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	reservation, ok := r.reservations[reservationId]
@@ -67,11 +68,11 @@ func (r *ItemRepository) ReleaseReservation(reservationId int32) error {
 		return errors.New("reservation not found")
 	}
 	r.reservations[reservationId] = &item.Reservation{
-		Id: reservationId,
+		Id:       reservationId,
 		TotalFee: reservation.TotalFee,
 		Quantity: reservation.Quantity,
-		ItemId: reservation.ItemId,
-		Status: "canceled",
+		ItemId:   reservation.ItemId,
+		Status:   "canceled",
 	}
 	return nil
 }
@@ -85,11 +86,11 @@ func (r *ItemRepository) CompleteReservation(reservationId int32) error {
 		return errors.New("reservation not found")
 	}
 	r.reservations[reservationId] = &item.Reservation{
-		Id: reservationId,
+		Id:       reservationId,
 		TotalFee: reservation.TotalFee,
 		Quantity: reservation.Quantity,
-		ItemId: reservation.ItemId,
-		Status: "completed",
+		ItemId:   reservation.ItemId,
+		Status:   "completed",
 	}
 	return nil
 }

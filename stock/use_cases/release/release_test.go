@@ -19,10 +19,10 @@ type mockRepository struct {
 }
 
 func (m *mockRepository) GetItem(itemId int32) (*stockitem.Item, error) { return m.getItemResult, m.getItemErr }
-func (m *mockRepository) Reserve(reservationItem *stockitem.Item, quantity int32) (*stockitem.Reservation, error) {
+func (m *mockRepository) Reserve(reservationItem *stockitem.Item, quantity int32, orderId string, idempotencyKey string, traceparent string) (*stockitem.Reservation, error) {
 	return m.reserveResult, m.reserveErr
 }
-func (m *mockRepository) ReleaseReservation(reservationId int32) error {
+func (m *mockRepository) ReleaseReservation(reservationId int32, traceparent string) error {
 	m.releaseCalledWithId = reservationId
 	return m.releaseErr
 }

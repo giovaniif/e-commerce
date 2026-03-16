@@ -50,7 +50,7 @@ services:
     ports:
       - "5432:5432"
     stop_grace_period: 5s
-    command: ["postgres", "-c", "max_connections=500"]
+    command: ["postgres", "-c", "wal_level=logical", "-c", "max_connections=500"]
     environment:
       - POSTGRES_DB=stock
       - POSTGRES_USER=stock
@@ -62,6 +62,135 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    networks:
+      - app
+
+  postgres-order:
+    image: postgres:16-alpine
+    container_name: postgres-order
+    ports:
+      - "5433:5432"
+    stop_grace_period: 5s
+    command: ["postgres", "-c", "wal_level=logical", "-c", "max_connections=200"]
+    environment:
+      - POSTGRES_DB=order
+      - POSTGRES_USER=order
+      - POSTGRES_PASSWORD=order
+    volumes:
+      - ./order/db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U order -d order"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - app
+
+  postgres-payment:
+    image: postgres:16-alpine
+    container_name: postgres-payment
+    ports:
+      - "5434:5432"
+    stop_grace_period: 5s
+    command: ["postgres", "-c", "wal_level=logical", "-c", "max_connections=200"]
+    environment:
+      - POSTGRES_DB=payment
+      - POSTGRES_USER=payment
+      - POSTGRES_PASSWORD=payment
+    volumes:
+      - ./payment/db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U payment -d payment"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - app
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: kafka
+    stop_grace_period: 10s
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics --bootstrap-server localhost:9092 --list"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    networks:
+      - app
+
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.6.0
+    container_name: schema-registry
+    ports:
+      - "8085:8081"
+    stop_grace_period: 5s
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka:9092
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - app
+
+  kafka-connect:
+    image: quay.io/debezium/connect:2.7
+    container_name: kafka-connect
+    ports:
+      - "8083:8083"
+    stop_grace_period: 10s
+    environment:
+      BOOTSTRAP_SERVERS: kafka:9092
+      GROUP_ID: debezium-connect
+      CONFIG_STORAGE_TOPIC: connect-configs
+      OFFSET_STORAGE_TOPIC: connect-offsets
+      STATUS_STORAGE_TOPIC: connect-status
+      CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      STATUS_STORAGE_REPLICATION_FACTOR: 1
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres-order:
+        condition: service_healthy
+      postgres-payment:
+        condition: service_healthy
+      postgres-stock:
+        condition: service_healthy
+    networks:
+      - app
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    ports:
+      - "8084:8080"
+    stop_grace_period: 5s
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_NAME: debezium
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_ADDRESS: http://kafka-connect:8083
+    depends_on:
+      kafka:
+        condition: service_healthy
     networks:
       - app
 
@@ -187,6 +316,7 @@ services:
       - STOCK_INITIAL_QUANTITY=1000000000
       - POSTGRES_URL=postgres://stock:stock@postgres-stock:5432/stock?sslmode=disable
       - REDIS_ADDR=redis-stock:6379
+      - KAFKA_BROKERS=kafka:9092
     depends_on:
       loki:
         condition: service_started
@@ -196,8 +326,11 @@ services:
         condition: service_healthy
       redis-stock:
         condition: service_started
+      kafka:
+        condition: service_healthy
     networks:
       - app
+
   payment:
     build: ./payment
     stop_grace_period: 10s
@@ -210,15 +343,18 @@ services:
     environment:
       - LOKI_URL=http://loki:3100
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://tempo:4318
-      - REDIS_ADDR=redis-payment:6379
       - MONGO_URL=mongodb://mongo-payment:27017
+      - POSTGRES_URL=postgres://payment:payment@postgres-payment:5432/payment?sslmode=disable
+      - KAFKA_BROKERS=kafka:9092
     depends_on:
       - loki
       - tempo
-      - redis-payment
       - mongo-payment
+      - postgres-payment
+      - kafka
     networks:
       - app
+
   order:
     build: ./order
     stop_grace_period: 10s
@@ -230,20 +366,22 @@ services:
           memory: 256M
     environment:
       - REDIS_ADDR=redis-order:6379
-      - STOCK_BASE_URL=http://stock:3133
-      - PAYMENT_BASE_URL=http://payment:3132
       - LOKI_URL=http://loki:3100
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://tempo:4318
       - MONGO_URL=mongodb://mongo-order:27017
+      - POSTGRES_URL=postgres://order:order@postgres-order:5432/order?sslmode=disable
+      - KAFKA_BROKERS=kafka:9092
+      - KAFKA_CONSUMER_GROUP=order-consumers
     depends_on:
       - redis-order
       - mongo-order
-      - stock
-      - payment
       - loki
       - tempo
+      - postgres-order
+      - kafka
     networks:
       - app
+
   nginx:
     image: nginx:latest
     container_name: nginx
@@ -263,3 +401,6 @@ networks:
   app:
     driver: bridge
     name: payments_app
+
+volumes:
+  kafka-data:

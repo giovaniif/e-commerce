@@ -20,7 +20,7 @@ func (r *Reserve) Reserve(itemId int32, quantity int32) (Output, error) {
 		return Output{}, err
 	}
 
-	reservation, err := r.itemRepository.Reserve(item, quantity)
+	reservation, err := r.itemRepository.Reserve(item, quantity, "", "", "")
 	if err != nil {
 		return Output{}, err
 	}

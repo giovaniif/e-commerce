@@ -1,0 +1,40 @@
+syntax = "proto3";
+package ecommerce.events;
+option go_package = "github.com/giovaniif/e-commerce/proto/events";
+
+message OrderCreated {
+    string order_id        = 1;
+    string idempotency_key = 2;
+    int32  item_id         = 3;
+    int32  quantity        = 4;
+    string traceparent     = 5;
+}
+
+message StockReserved {
+    string order_id        = 1;
+    string idempotency_key = 2;
+    int32  item_id         = 3;
+    int32  quantity        = 4;
+    int64  reservation_id  = 5;
+    double total_fee       = 6;
+    string traceparent     = 7;
+}
+
+message StockReservationFailed {
+    string order_id        = 1;
+    string idempotency_key = 2;
+    int32  item_id         = 3;
+    int32  quantity        = 4;
+    string reason          = 5;
+    string traceparent     = 6;
+}
+
+message PaymentProcessed {
+    string order_id        = 1;
+    string idempotency_key = 2;
+    int64  reservation_id  = 3;
+    double amount          = 4;
+    bool   success         = 5;
+    string failure_reason  = 6;
+    string traceparent     = 7;
+}

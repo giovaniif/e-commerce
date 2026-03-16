@@ -2,27 +2,34 @@ package checkout
 
 import (
 	"context"
-	"fmt"
-	"log/slog"
-	"math"
-	"time"
+	"database/sql"
+	"encoding/json"
 
-	"github.com/giovaniif/e-commerce/order/infra"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+
+	"github.com/giovaniif/e-commerce/order/infra/repositories"
 	protocols "github.com/giovaniif/e-commerce/order/protocols"
 )
 
-var (
-	MAX_RETRIES = 2
-	BASE_DELAY  = 100 * time.Millisecond
-)
+type Checkout struct {
+	checkoutGateway protocols.CheckoutGateway
+	orderRepo       *repositories.OrderRepository
+	outboxRepo      *repositories.OutboxRepository
+	db              *sql.DB
+}
 
-func NewCheckout(stockGateway protocols.StockGateway, paymentGateway protocols.PaymentGateway, checkoutGateway protocols.CheckoutGateway, sleeper protocols.Sleeper, orderGateway protocols.OrderGateway) *Checkout {
+func NewCheckout(
+	checkoutGateway protocols.CheckoutGateway,
+	orderRepo *repositories.OrderRepository,
+	outboxRepo *repositories.OutboxRepository,
+	db *sql.DB,
+) *Checkout {
 	return &Checkout{
-		stockGateway:    stockGateway,
-		paymentGateway:  paymentGateway,
 		checkoutGateway: checkoutGateway,
-		sleeper:         sleeper,
-		orderGateway:    orderGateway,
+		orderRepo:       orderRepo,
+		outboxRepo:      outboxRepo,
+		db:              db,
 	}
 }
 
@@ -35,8 +42,8 @@ func (c *Checkout) Checkout(ctx context.Context, input Input) error {
 	if err != nil {
 		return err
 	}
-	keyBeingProcessed := result != nil
-	if keyBeingProcessed {
+	if result != nil {
+		// Already processed — short-circuit before setting up defer.
 		return nil
 	}
 
@@ -49,92 +56,58 @@ func (c *Checkout) Checkout(ctx context.Context, input Input) error {
 		}
 	}()
 
-	reservationOperation := func() (*protocols.Reservation, error) {
-		reservation, reservationError := c.stockGateway.Reserve(ctx, input.ItemId, input.Quantity)
-		return reservation, reservationError
+	tx, err := c.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
 	}
-	wrappedOperation := RetryWithBackoff(ctx, reservationOperation, c.sleeper)
-	reservation, err := wrappedOperation()
+	defer tx.Rollback()
+
+	orderId, err := c.orderRepo.CreatePendingTx(ctx, tx, input.IdempotencyKey, input.ItemId, input.Quantity)
+	if err != nil {
+		return err
+	}
+	if orderId == "" {
+		// Idempotent: order already exists for this key.
+		success = true
+		return nil
+	}
+
+	// Inject current OTel span context into traceparent header.
+	carrier := propagation.MapCarrier{}
+	otel.GetTextMapPropagator().Inject(ctx, carrier)
+	traceparent := carrier.Get("traceparent")
+
+	payload, err := json.Marshal(map[string]interface{}{
+		"order_id":        orderId,
+		"idempotency_key": input.IdempotencyKey,
+		"item_id":         input.ItemId,
+		"quantity":        input.Quantity,
+		"traceparent":     traceparent,
+	})
 	if err != nil {
 		return err
 	}
 
-	err = c.paymentGateway.Charge(ctx, reservation.TotalFee, input.IdempotencyKey)
-	if err != nil {
-		c.stockGateway.Release(ctx, reservation.Id)
+	if err := c.outboxRepo.InsertTx(ctx, tx, repositories.OutboxEvent{
+		AggregateType: "ORDER",
+		AggregateID:   orderId,
+		Type:          "OrderCreated",
+		Payload:       payload,
+		Traceparent:   traceparent,
+	}); err != nil {
 		return err
 	}
 
-	completeStockOperation := RetryWithBackoff(ctx, func() (*protocols.Reservation, error) {
-		completeStockError := c.stockGateway.Complete(ctx, reservation.Id)
-
-		return nil, completeStockError
-	}, c.sleeper)
-	_, err = completeStockOperation()
-	if err != nil {
-		releaseStockOperation := RetryWithBackoff(ctx, func() (*protocols.Reservation, error) {
-			releaseStockError := c.stockGateway.Release(ctx, reservation.Id)
-			return nil, releaseStockError
-		}, c.sleeper)
-		_, releaseStockError := releaseStockOperation()
-		if releaseStockError != nil {
-			fmt.Printf("Failed to release stock for reservation after complete error %d: %v\n", reservation.Id, releaseStockError)
-			return releaseStockError
-		}
+	if err := tx.Commit(); err != nil {
 		return err
 	}
 
 	success = true
-	if err := c.orderGateway.SaveOrder(ctx, input.IdempotencyKey, input.ItemId, input.Quantity); err != nil {
-		slog.ErrorContext(ctx, "failed to save order", "error", err)
-	}
 	return nil
-}
-
-type RetryFunc func() (*protocols.Reservation, error)
-
-func RetryWithBackoff(ctx context.Context, operation RetryFunc, sleeper protocols.Sleeper) RetryFunc {
-	return func() (*protocols.Reservation, error) {
-		var lastError error
-
-		for i := 0; i < MAX_RETRIES; i++ {
-			if ctx.Err() != nil {
-				return nil, ctx.Err()
-			}
-			val, err := operation()
-
-			if err == nil {
-				return val, err
-			}
-			lastError = err
-
-			if !infra.IsRetriable(err) {
-				return nil, err
-			}
-
-			if ctx.Err() != nil {
-				return nil, ctx.Err()
-			}
-			secRetry := math.Pow(2, float64(i))
-			fmt.Printf("Retrying operation in %f seconds\n", secRetry)
-			delay := time.Duration(secRetry) * BASE_DELAY
-			sleeper.Sleep(delay)
-		}
-
-		return nil, lastError
-	}
 }
 
 type Input struct {
 	ItemId         int32
 	Quantity       int32
 	IdempotencyKey string
-}
-
-type Checkout struct {
-	stockGateway    protocols.StockGateway
-	paymentGateway  protocols.PaymentGateway
-	checkoutGateway protocols.CheckoutGateway
-	sleeper         protocols.Sleeper
-	orderGateway    protocols.OrderGateway
 }

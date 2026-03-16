@@ -2,7 +2,7 @@ package api
 
 import (
 	"context"
-	"errors"
+	"database/sql"
 	"fmt"
 	"io"
 	"log/slog"
@@ -10,21 +10,23 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	_ "github.com/lib/pq"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
 	"github.com/giovaniif/e-commerce/order/infra/gateways"
+	kafkaconsumer "github.com/giovaniif/e-commerce/order/infra/kafka"
 	"github.com/giovaniif/e-commerce/order/infra/loki"
 	"github.com/giovaniif/e-commerce/order/infra/metrics"
+	"github.com/giovaniif/e-commerce/order/infra/repositories"
 	"github.com/giovaniif/e-commerce/order/infra/requestid"
 	"github.com/giovaniif/e-commerce/order/infra/tracing"
 	"github.com/giovaniif/e-commerce/order/protocols"
 	checkout "github.com/giovaniif/e-commerce/order/use_cases"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 const defaultCheckoutTimeoutSec = 30
@@ -35,24 +37,27 @@ type CheckoutRequest struct {
 }
 
 func StartServer() {
-	stockBaseURL := os.Getenv("STOCK_BASE_URL")
-	if stockBaseURL == "" {
-		stockBaseURL = "http://localhost:3133"
+	postgresURL := os.Getenv("POSTGRES_URL")
+	if postgresURL == "" {
+		fmt.Println("POSTGRES_URL is required")
+		os.Exit(1)
 	}
-	paymentBaseURL := os.Getenv("PAYMENT_BASE_URL")
-	if paymentBaseURL == "" {
-		paymentBaseURL = "http://localhost:3132"
+	db, err := sql.Open("postgres", postgresURL)
+	if err != nil {
+		fmt.Printf("Failed to open postgres: %v\n", err)
+		os.Exit(1)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(80)
+	db.SetMaxIdleConns(40)
+	db.SetConnMaxLifetime(5 * time.Minute)
+	if err := db.Ping(); err != nil {
+		fmt.Printf("Failed to ping postgres: %v\n", err)
+		os.Exit(1)
 	}
 
-	httpClient := &http.Client{
-		Transport: &http.Transport{
-			MaxIdleConns:        2000,
-			MaxIdleConnsPerHost: 1000,
-			IdleConnTimeout:     90 * time.Second,
-		},
-	}
-	stockGateway := gateways.NewStockGatewayHttp(httpClient, stockBaseURL)
-	paymentGateway := gateways.NewPaymentGatewayHttp(httpClient, paymentBaseURL)
+	orderRepo := repositories.NewOrderRepository(db)
+	outboxRepo := repositories.NewOutboxRepository(db)
 
 	var checkoutGateway protocols.CheckoutGateway
 	if redisAddr := os.Getenv("REDIS_ADDR"); redisAddr != "" {
@@ -69,27 +74,8 @@ func StartServer() {
 		fmt.Println("Checkout idempotency: in-memory (set REDIS_ADDR for Redis)")
 	}
 
-	sleeperGateway := gateways.NewSleeper()
-
-	var orderGateway protocols.OrderGateway
-	if mongoURL := os.Getenv("MONGO_URL"); mongoURL != "" {
-		mongoClient, err := mongo.Connect(options.Client().ApplyURI(mongoURL))
-		if err != nil {
-			fmt.Printf("MongoDB connect failed (%s), using noop order gateway: %v\n", mongoURL, err)
-			orderGateway = &OrderGatewayNoop{}
-		} else if err := mongoClient.Ping(context.Background(), nil); err != nil {
-			fmt.Printf("MongoDB ping failed (%s), using noop order gateway: %v\n", mongoURL, err)
-			orderGateway = &OrderGatewayNoop{}
-		} else {
-			orderGateway = gateways.NewOrderGatewayMongo(mongoClient)
-			fmt.Println("Order gateway: MongoDB")
-		}
-	} else {
-		orderGateway = &OrderGatewayNoop{}
-		fmt.Println("Order gateway: noop (set MONGO_URL for MongoDB)")
-	}
-
-	checkoutUseCase := checkout.NewCheckout(stockGateway, paymentGateway, checkoutGateway, sleeperGateway, orderGateway)
+	checkoutUseCase := checkout.NewCheckout(checkoutGateway, orderRepo, outboxRepo, db)
+	finalizeOrderUseCase := checkout.NewFinalizeOrder(orderRepo)
 
 	logOut := io.Writer(os.Stdout)
 	var lokiWriter *loki.Writer
@@ -105,6 +91,26 @@ func StartServer() {
 	shutdownTracing := tracing.Init("order")
 	if shutdownTracing != nil {
 		defer shutdownTracing()
+	}
+
+	// Start Kafka consumer for PaymentProcessed
+	kafkaBrokers := strings.Split(os.Getenv("KAFKA_BROKERS"), ",")
+	consumerGroup := os.Getenv("KAFKA_CONSUMER_GROUP")
+	if consumerGroup == "" {
+		consumerGroup = "order-consumers"
+	}
+	var consumer *kafkaconsumer.Consumer
+	if len(kafkaBrokers) > 0 && kafkaBrokers[0] != "" {
+		consumer = kafkaconsumer.NewConsumer(kafkaBrokers, "payment.PaymentProcessed", consumerGroup, finalizeOrderUseCase)
+		ctx, cancelConsumer := context.WithCancel(context.Background())
+		go consumer.Run(ctx)
+		defer func() {
+			cancelConsumer()
+			consumer.Close()
+		}()
+		slog.Info("Kafka consumer started", "brokers", kafkaBrokers, "topic", "payment.PaymentProcessed")
+	} else {
+		slog.Warn("KAFKA_BROKERS not set, Kafka consumer not started")
 	}
 
 	r := gin.Default()
@@ -170,15 +176,11 @@ func StartServer() {
 			IdempotencyKey: idempotencyKey,
 		})
 		if err != nil {
-			if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-				slog.ErrorContext(contextWithTimeout, "checkout timeout", "request_id", requestID, "item_id", checkoutRequest.ItemId, "quantity", checkoutRequest.Quantity, "error", err)
-				c.String(http.StatusGatewayTimeout, err.Error())
-			} else {
-				slog.ErrorContext(contextWithTimeout, "checkout failed", "request_id", requestID, "item_id", checkoutRequest.ItemId, "quantity", checkoutRequest.Quantity, "error", err)
-				c.String(http.StatusInternalServerError, err.Error())
-			}
+			slog.ErrorContext(contextWithTimeout, "checkout failed", "request_id", requestID,
+				"item_id", checkoutRequest.ItemId, "quantity", checkoutRequest.Quantity, "error", err)
+			c.String(http.StatusInternalServerError, err.Error())
 		} else {
-			c.String(http.StatusOK, "Checkout successful")
+			c.String(http.StatusAccepted, "Checkout accepted")
 		}
 	})
 
@@ -207,10 +209,4 @@ func StartServer() {
 	} else {
 		fmt.Println("Order stopped")
 	}
-}
-
-type OrderGatewayNoop struct{}
-
-func (g *OrderGatewayNoop) SaveOrder(ctx context.Context, idempotencyKey string, itemId int32, quantity int32) error {
-	return nil
 }

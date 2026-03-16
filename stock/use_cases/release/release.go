@@ -15,7 +15,7 @@ func NewRelease(itemRepository item.Repository) *Release {
 }
 
 func (r *Release) Release(input Input) (error) {
-	err := r.itemRepository.ReleaseReservation(input.ReservationId)
+	err := r.itemRepository.ReleaseReservation(input.ReservationId, "")
 	if err != nil {
 		return err
 	}

@@ -30,3 +30,24 @@ INSERT INTO items (id, price, initial_stock) VALUES
     (9,   8.50, 1000000000),
     (10, 19.99, 1000000000)
 ON CONFLICT DO NOTHING;
+
+ALTER TABLE stock_events
+    ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(255),
+    ADD COLUMN IF NOT EXISTS traceparent     VARCHAR(55) NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS order_id        VARCHAR(255) NOT NULL DEFAULT '';
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_stock_events_idempotency
+    ON stock_events(idempotency_key) WHERE event_type = 'reserved';
+
+CREATE TABLE IF NOT EXISTS outbox (
+    id             UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    aggregate_type VARCHAR(50)  NOT NULL,
+    aggregate_id   VARCHAR(255) NOT NULL,
+    type           VARCHAR(100) NOT NULL,
+    payload        JSONB        NOT NULL,
+    traceparent    VARCHAR(55)  NOT NULL DEFAULT '',
+    created_at     TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    processed      BOOLEAN      NOT NULL DEFAULT FALSE
+);
+
+ALTER TABLE outbox REPLICA IDENTITY FULL;
