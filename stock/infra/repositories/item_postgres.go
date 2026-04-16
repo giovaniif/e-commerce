@@ -11,6 +11,11 @@ import (
 	"github.com/giovaniif/e-commerce/stock/domain/item"
 )
 
+var (
+	ErrItemNotFound      = errors.New("item not found")
+	ErrInsufficientStock = errors.New("insufficient stock")
+)
+
 type ItemRepositoryPostgres struct {
 	db  *sql.DB
 	rdb *redis.Client
