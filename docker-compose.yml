@@ -1,4 +1,115 @@
 services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: zookeeper
+    ports:
+      - "2181:2181"
+    stop_grace_period: 5s
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: kafka
+    ports:
+      - "9092:9092"
+    stop_grace_period: 10s
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "kafka:9092"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  kafka-connect:
+    image: debezium/connect:2.7
+    container_name: kafka-connect
+    ports:
+      - "8083:8083"
+    stop_grace_period: 10s
+    depends_on:
+      kafka:
+        condition: service_healthy
+      order-db:
+        condition: service_healthy
+      stock-db:
+        condition: service_healthy
+      payment-db:
+        condition: service_healthy
+    environment:
+      BOOTSTRAP_SERVERS: kafka:9092
+      GROUP_ID: 1
+      CONFIG_STORAGE_TOPIC: connect_configs
+      OFFSET_STORAGE_TOPIC: connect_offsets
+      STATUS_STORAGE_TOPIC: connect_statuses
+
+  order-db:
+    image: postgres:16
+    container_name: order-db
+    ports:
+      - "5432:5432"
+    stop_grace_period: 5s
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: orders
+    command: postgres -c wal_level=logical
+    volumes:
+      - order_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d orders"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  stock-db:
+    image: postgres:16
+    container_name: stock-db
+    ports:
+      - "5433:5432"
+    stop_grace_period: 5s
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: stock
+    command: postgres -c wal_level=logical
+    volumes:
+      - stock_db_data:/var/lib/postgresql/data
+      - ./stock/db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d stock"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  payment-db:
+    image: postgres:16
+    container_name: payment-db
+    ports:
+      - "5434:5432"
+    stop_grace_period: 5s
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: payments
+    command: postgres -c wal_level=logical
+    volumes:
+      - payment_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d payments"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   redis:
     image: redis:alpine
     container_name: redis
@@ -89,9 +200,14 @@ services:
     environment:
       - LOKI_URL=http://loki:3100
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://tempo:4318
+      - DATABASE_URL=postgres://postgres:postgres@stock-db:5432/stock
     depends_on:
-      - loki
-      - tempo
+      stock-db:
+        condition: service_healthy
+      loki:
+        condition: service_started
+      tempo:
+        condition: service_started
   payment:
     build: ./payment
     container_name: payment
@@ -137,4 +253,7 @@ services:
 
 volumes:
   grafana_data:
+  order_db_data:
+  stock_db_data:
+  payment_db_data:
     
