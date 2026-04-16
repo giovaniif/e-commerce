@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/giovaniif/e-commerce/stock/domain/item"
 	"github.com/giovaniif/e-commerce/stock/infra/loki"
@@ -40,10 +41,21 @@ type CompleteRequest struct {
 }
 
 func StartServer() {
-	items := make(map[int32]*item.Item)
-	items[1] = &item.Item{Id: 1, Price: 10, InitialStock: 10}
-	reservations := make(map[int32]*item.Reservation)
-	itemRepository := repositories.NewItemRepository(items, reservations)
+	var itemRepository item.Repository
+	if dbURL := os.Getenv("DATABASE_URL"); dbURL != "" {
+		pool, err := pgxpool.New(context.Background(), dbURL)
+		if err != nil {
+			fmt.Printf("failed to connect to database: %v\n", err)
+			os.Exit(1)
+		}
+		defer pool.Close()
+		itemRepository = repositories.NewItemRepositoryPostgres(pool)
+	} else {
+		items := make(map[int32]*item.Item)
+		items[1] = &item.Item{Id: 1, Price: 10, InitialStock: 10}
+		reservations := make(map[int32]*item.Reservation)
+		itemRepository = repositories.NewItemRepository(items, reservations)
+	}
 	reserveUseCase := reserve.NewReserve(itemRepository)
 	releaseUseCase := release.NewRelease(itemRepository)
 	completeUseCase := complete.NewComplete(itemRepository)
