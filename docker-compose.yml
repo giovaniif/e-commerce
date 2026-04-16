@@ -1,4 +1,105 @@
 services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: zookeeper
+    ports:
+      - "2181:2181"
+    stop_grace_period: 5s
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - app
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: kafka
+    ports:
+      - "9092:9092"
+    stop_grace_period: 10s
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "kafka:9092"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - app
+
+  kafka-connect:
+    image: debezium/connect:2.7
+    container_name: kafka-connect
+    ports:
+      - "8083:8083"
+    stop_grace_period: 10s
+    depends_on:
+      kafka:
+        condition: service_healthy
+      order-db:
+        condition: service_healthy
+      postgres-stock:
+        condition: service_healthy
+      payment-db:
+        condition: service_healthy
+    environment:
+      BOOTSTRAP_SERVERS: kafka:9092
+      GROUP_ID: 1
+      CONFIG_STORAGE_TOPIC: connect_configs
+      OFFSET_STORAGE_TOPIC: connect_offsets
+      STATUS_STORAGE_TOPIC: connect_statuses
+    networks:
+      - app
+
+  order-db:
+    image: postgres:16
+    container_name: order-db
+    ports:
+      - "5433:5432"
+    stop_grace_period: 5s
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: orders
+    command: postgres -c wal_level=logical
+    volumes:
+      - order_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d orders"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - app
+
+  payment-db:
+    image: postgres:16
+    container_name: payment-db
+    ports:
+      - "5434:5432"
+    stop_grace_period: 5s
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: payments
+    command: postgres -c wal_level=logical
+    volumes:
+      - payment_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d payments"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - app
+
   redis-order:
     image: redis:alpine
     container_name: redis-order
@@ -50,7 +151,7 @@ services:
     ports:
       - "5432:5432"
     stop_grace_period: 5s
-    command: ["postgres", "-c", "max_connections=500"]
+    command: ["postgres", "-c", "max_connections=500", "-c", "wal_level=logical"]
     environment:
       - POSTGRES_DB=stock
       - POSTGRES_USER=stock
@@ -263,3 +364,8 @@ networks:
   app:
     driver: bridge
     name: payments_app
+
+volumes:
+  grafana_data:
+  order_db_data:
+  payment_db_data:
